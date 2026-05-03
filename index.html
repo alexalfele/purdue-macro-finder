@@ -1,0 +1,2013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Find the perfect meal at Purdue dining courts based on your macro targets">
+    <title>Purdue Macro Finder</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        /* --- 1. CSS VARIABLES & RESET --- */
+        :root {
+            /* Brand */
+            --purdue-gold: #CFB991;
+            --purdue-gold-bright: #E5CFA1;
+            --purdue-gold-deep: #A68A56;
+            --purdue-dark: #231F20;
+
+            /* Surfaces — slightly cooler dark for more depth */
+            --bg-primary: #0e0e12;
+            --bg-secondary: #18181f;
+            --bg-tertiary: #22222b;
+            --bg-elevated: #2a2a35;
+            --border-color: #353541;
+            --border-subtle: rgba(255, 255, 255, 0.06);
+
+            /* Text */
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+
+            /* Status */
+            --success: #22c55e;
+            --warning: #fbbf24;
+            --error: #ef4444;
+
+            /* Macro accents (used for item cards, totals, chart) */
+            --macro-protein: #6ee7b7;
+            --macro-carb: #7dd3fc;
+            --macro-fat: #fde047;
+
+            /* Effects */
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5);
+            --shadow-glow: 0 0 24px rgba(207, 185, 145, 0.18);
+            --gradient-gold: linear-gradient(135deg, var(--purdue-gold-bright), var(--purdue-gold) 50%, var(--purdue-gold-deep));
+            --gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0));
+            --radius: 10px;
+            --radius-lg: 14px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            min-height: 100%;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-primary);
+            background-image:
+                radial-gradient(ellipse 80% 50% at 50% -10%, rgba(207, 185, 145, 0.12), transparent 60%),
+                radial-gradient(ellipse 50% 40% at 90% 110%, rgba(207, 185, 145, 0.05), transparent 60%);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            margin: 0;
+            padding: 1.5rem;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+        }
+
+        /* --- 2. HEADER --- */
+        .header {
+            position: relative;
+            text-align: center;
+            margin-bottom: 2.5rem;
+            padding-top: 1rem;
+        }
+
+        .header h1 {
+            font-family: 'Manrope', 'Inter', sans-serif;
+            font-size: clamp(2rem, 4vw, 2.75rem);
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            background: var(--gradient-gold);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            margin: 0;
+            line-height: 1.1;
+        }
+
+        .header p.tagline {
+            margin: 0.4rem 0 0 0;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            font-weight: 400;
+            letter-spacing: 0.01em;
+        }
+
+        .icon-button {
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            padding: 0.5rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+            line-height: 0;
+        }
+
+        .icon-button:hover {
+            color: var(--purdue-gold);
+            border-color: rgba(207, 185, 145, 0.4);
+            background-color: rgba(207, 185, 145, 0.08);
+        }
+
+        #settings-button {
+            position: absolute;
+            top: 1rem;
+            right: 0;
+        }
+
+        @media (max-width: 600px) {
+            #settings-button {
+                top: 0.5rem;
+            }
+        }
+
+        /* --- MODAL --- */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            padding: 1rem;
+        }
+
+        .modal-card {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 0;
+            width: 100%;
+            max-width: 480px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            animation: modal-in 0.18s ease-out;
+        }
+
+        @keyframes modal-in {
+            from { opacity: 0; transform: translateY(8px) scale(0.98); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.25rem;
+            color: var(--purdue-gold);
+        }
+
+        .modal-header .icon-button {
+            font-size: 1.5rem;
+            line-height: 1;
+            padding: 0.25rem 0.6rem;
+        }
+
+        .modal-body {
+            padding: 1.25rem;
+        }
+
+        .modal-body h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1rem;
+        }
+
+        .muted-small {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin: 0 0 0.75rem 0;
+        }
+
+        .muted-small a {
+            color: var(--purdue-gold);
+        }
+
+        .footnote {
+            margin-top: 1rem;
+            font-size: 0.75rem;
+        }
+
+        .footnote code {
+            background: var(--bg-tertiary);
+            padding: 0.05rem 0.3rem;
+            border-radius: 3px;
+        }
+
+        .settings-key-status {
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-bottom: 0.75rem;
+        }
+
+        .settings-key-status.configured {
+            border-color: rgba(34, 197, 94, 0.4);
+            color: #86efac;
+        }
+
+        .settings-key-status.unconfigured {
+            border-color: rgba(251, 191, 36, 0.4);
+            color: #fcd34d;
+        }
+
+        .settings-error {
+            color: var(--error);
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 6px;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.85rem;
+            margin: 0.5rem 0 0 0;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* --- AI tab banner (key-not-set warning) --- */
+        .ai-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.75rem 0.95rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(251, 191, 36, 0.04));
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            border-radius: var(--radius);
+            color: var(--text-primary);
+            font-size: 0.88rem;
+        }
+
+        .ai-banner strong {
+            color: #fcd34d;
+        }
+
+        .ai-banner span {
+            color: var(--text-secondary);
+            margin-left: 0.35rem;
+        }
+
+        .banner-button {
+            padding: 0.45rem 0.9rem;
+            background: var(--gradient-gold);
+            color: var(--purdue-dark);
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 0.82rem;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .banner-button:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-glow);
+        }
+
+        /* --- 3. LAYOUT --- */
+        .app-container {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+            max-width: 1200px;
+            margin: auto;
+        }
+
+        @media (min-width: 1024px) {
+            .app-container {
+                grid-template-columns: 38% 1fr;
+                gap: 1.75rem;
+            }
+        }
+
+        @media (min-width: 1400px) {
+            .app-container {
+                max-width: 1280px;
+            }
+        }
+
+        .controls-panel, .results-panel {
+            background-color: var(--bg-secondary);
+            background-image: var(--gradient-card);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-subtle);
+            padding: 1.75rem;
+            box-shadow: var(--shadow-md);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* Subtle top-edge highlight on panels */
+        .controls-panel::before, .results-panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 1.5rem; right: 1.5rem;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(207, 185, 145, 0.3), transparent);
+            pointer-events: none;
+        }
+
+        .results-panel {
+            min-height: 500px;
+        }
+
+        /* --- 4. TABS --- */
+        .tab-buttons {
+            display: flex;
+            gap: 0.25rem;
+            padding: 0.3rem;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius);
+            margin-bottom: 1.5rem;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .tab-button {
+            flex: 1;
+            background-color: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0.65rem 0.75rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border-radius: 7px;
+            transition: all 0.18s ease;
+            font-family: inherit;
+        }
+
+        .tab-button:hover {
+            color: var(--text-primary);
+            background-color: rgba(255, 255, 255, 0.04);
+        }
+
+        .tab-button.active {
+            background-color: var(--bg-elevated);
+            color: var(--purdue-gold);
+            box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-button:focus-visible {
+            outline: 2px solid var(--purdue-gold);
+            outline-offset: 2px;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fade-in 0.25s ease-out;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(4px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* --- DATE PICKER (shared across tabs) --- */
+        .date-picker-row {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            background-color: var(--bg-tertiary);
+            background-image: var(--gradient-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 0.55rem 0.75rem 0.55rem 1rem;
+            margin-bottom: 1.25rem;
+            transition: border-color 0.15s ease;
+        }
+
+        .date-picker-row:focus-within {
+            border-color: rgba(207, 185, 145, 0.5);
+        }
+
+        .date-picker-row label {
+            margin: 0;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+        }
+
+        .date-picker-row input[type="date"] {
+            flex: 1;
+            width: auto;
+            padding: 0.45rem 0.65rem;
+            font-size: 0.92rem;
+            color-scheme: dark;
+        }
+
+        .date-today-button {
+            padding: 0.45rem 0.85rem;
+            background-color: rgba(207, 185, 145, 0.1);
+            color: var(--purdue-gold);
+            border: 1px solid rgba(207, 185, 145, 0.4);
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .date-today-button:hover {
+            background-color: rgba(207, 185, 145, 0.2);
+            border-color: var(--purdue-gold);
+        }
+
+        .meal-time {
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            font-weight: 400;
+            margin-left: 0.4rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* --- 5. COLLAPSIBLE CARDS --- */
+        .collapsible-card {
+            background-color: var(--bg-tertiary);
+            background-image: var(--gradient-card);
+            border-radius: var(--radius);
+            margin-bottom: 0.85rem;
+            border: 1px solid var(--border-color);
+            transition: border-color 0.18s ease, transform 0.18s ease;
+            overflow: hidden;
+        }
+
+        .collapsible-card:hover {
+            border-color: rgba(207, 185, 145, 0.35);
+        }
+
+        .collapsible-card summary {
+            font-size: 1rem;
+            font-weight: 600;
+            padding: 0.9rem 1rem;
+            cursor: pointer;
+            list-style: none;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .collapsible-card summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .collapsible-card summary::before {
+            content: '';
+            width: 6px; height: 6px;
+            border-right: 2px solid var(--purdue-gold);
+            border-bottom: 2px solid var(--purdue-gold);
+            transform: rotate(-45deg);
+            transition: transform 0.2s ease;
+            margin-left: 2px;
+            margin-right: 4px;
+        }
+
+        .collapsible-card[open] summary::before {
+            transform: rotate(45deg);
+        }
+
+        .collapsible-card[open] summary {
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .collapsible-card > div {
+            padding: 1rem;
+        }
+
+        /* --- 6. FORMS & INPUTS --- */
+        .card {
+            background-color: var(--bg-tertiary);
+            background-image: var(--gradient-card);
+            border-radius: var(--radius);
+            padding: 1.25rem 1.4rem;
+            margin-bottom: 1.25rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .card h2, .card h3 {
+            font-family: 'Manrope', 'Inter', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            margin-top: 0;
+            margin-bottom: 0.85rem;
+            padding-bottom: 0.7rem;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+        }
+
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 0.45rem;
+        }
+
+        input[type="number"],
+        input[type="date"],
+        input[type="password"],
+        input[type="text"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 0.7rem 0.85rem;
+            background-color: var(--bg-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+            font-family: inherit;
+        }
+
+        input[type="number"]:focus,
+        input[type="date"]:focus,
+        input[type="password"]:focus,
+        input[type="text"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--purdue-gold);
+            box-shadow: 0 0 0 3px rgba(207, 185, 145, 0.18);
+            background-color: var(--bg-tertiary);
+        }
+
+        input[type="number"]:hover,
+        input[type="date"]:hover,
+        input[type="password"]:hover,
+        input[type="text"]:hover,
+        select:hover,
+        textarea:hover {
+            border-color: rgba(207, 185, 145, 0.45);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 88px;
+            line-height: 1.5;
+        }
+
+        .macro-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 0.85rem;
+        }
+
+        .filters label {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            color: var(--text-primary);
+            padding: 0.4rem 0;
+            margin: 0;
+            cursor: pointer;
+            font-size: 0.92rem;
+            text-transform: none;
+            letter-spacing: 0;
+            font-weight: 500;
+            transition: color 0.15s ease;
+        }
+
+        .filters label:hover {
+            color: var(--purdue-gold);
+        }
+
+        input[type="checkbox"] {
+            width: 1.05em;
+            height: 1.05em;
+            background-color: var(--bg-elevated);
+            border: 1.5px solid var(--border-color);
+            border-radius: 4px;
+            accent-color: var(--purdue-gold);
+            cursor: pointer;
+            transition: border-color 0.15s ease;
+        }
+
+        input[type="checkbox"]:hover {
+            border-color: var(--purdue-gold);
+        }
+
+        .form-header {
+            font-family: 'Manrope', 'Inter', sans-serif;
+            font-size: 1.05rem !important;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+        }
+
+        /* --- 7. BUTTONS --- */
+        .cta-footer {
+            margin-top: auto;
+            padding-top: 1.25rem;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .cta-button {
+            width: 100%;
+            padding: 0.95rem;
+            background: var(--gradient-gold);
+            color: var(--purdue-dark);
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 700;
+            font-family: 'Inter', sans-serif;
+            letter-spacing: 0.01em;
+            cursor: pointer;
+            transition: all 0.18s ease;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset, var(--shadow-sm);
+            position: relative;
+        }
+
+        .cta-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, var(--shadow-md), var(--shadow-glow);
+        }
+
+        .cta-button:active {
+            transform: translateY(0);
+        }
+
+        .cta-button:disabled {
+            background: #3a3a44;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .cta-button:focus-visible {
+            outline: 2px solid var(--purdue-gold);
+            outline-offset: 3px;
+        }
+
+        #reset-button {
+            width: 100%;
+            padding: 0.65rem;
+            background-color: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-family: 'Inter', sans-serif;
+            font-weight: 500;
+            cursor: pointer;
+            margin-top: 0.6rem;
+            transition: all 0.15s ease;
+        }
+
+        #reset-button:hover {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: rgba(207, 185, 145, 0.4);
+        }
+
+        #status-label {
+            font-size: 0.825rem;
+            color: var(--text-secondary);
+            text-align: center;
+            margin: 0.85rem 0 0 0;
+            min-height: 1.25em;
+            transition: color 0.2s ease;
+        }
+
+        /* --- 8. LOADING STATES --- */
+        .hidden {
+            display: none !important;
+        }
+
+        #results-placeholder {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 4rem 1.5rem;
+            margin: auto;
+        }
+
+        #results-placeholder .placeholder-icon {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 1.5rem;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(207, 185, 145, 0.15), rgba(207, 185, 145, 0.04));
+            border: 1px solid rgba(207, 185, 145, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--purdue-gold);
+            font-size: 2rem;
+        }
+
+        #results-placeholder h3 {
+            font-family: 'Manrope', 'Inter', sans-serif;
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+            margin: 0 0 0.4rem 0;
+        }
+
+        #results-placeholder p {
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        #loading-spinner {
+            text-align: center;
+            padding: 4rem 0;
+            color: var(--text-secondary);
+            margin: auto;
+        }
+
+        #loading-spinner p {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .spinner {
+            width: 44px;
+            height: 44px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--purdue-gold);
+            border-right-color: var(--purdue-gold-bright);
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: rotation 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
+        }
+
+        .spinner-inline {
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(35, 31, 32, 0.3);
+            border-top-color: var(--purdue-dark);
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: rotation 0.8s linear infinite;
+            margin-right: 0.5rem;
+            vertical-align: -2px;
+        }
+
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* --- 9. RESULTS PANEL --- */
+        #result-header {
+            font-family: 'Manrope', 'Inter', sans-serif;
+            font-size: 1.65rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: var(--purdue-gold);
+            margin: 0 0 1.25rem 0;
+            line-height: 1.15;
+        }
+
+        .explanation-card {
+            background:
+                radial-gradient(circle at top right, rgba(207, 185, 145, 0.18), transparent 60%),
+                linear-gradient(135deg, rgba(207, 185, 145, 0.08), rgba(207, 185, 145, 0.02));
+            border: 1px solid rgba(207, 185, 145, 0.35);
+        }
+
+        .explanation-card h3 {
+            color: var(--purdue-gold);
+            border-bottom-color: rgba(207, 185, 145, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+        }
+
+        .explanation-card h3::before {
+            content: '✨';
+            font-size: 0.95rem;
+        }
+
+        .explanation-card p {
+            color: var(--text-primary);
+            line-height: 1.55;
+            margin: 0;
+            font-size: 0.92rem;
+        }
+
+        /* AI-picked tags (filters / meal periods the AI inferred) */
+        .ai-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            margin-top: 0.85rem;
+        }
+
+        .ai-tag {
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 0.22rem 0.6rem;
+            border-radius: 999px;
+            background-color: rgba(207, 185, 145, 0.1);
+            color: var(--purdue-gold);
+            border: 1px solid rgba(207, 185, 145, 0.25);
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+
+        /* --- 10. MEAL ITEMS --- */
+        .item-card {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 1rem;
+            align-items: center;
+            background: linear-gradient(180deg, var(--bg-elevated), var(--bg-tertiary));
+            padding: 0.95rem 1.1rem;
+            border-radius: 10px;
+            margin-bottom: 0.6rem;
+            border: 1px solid var(--border-color);
+            transition: all 0.18s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .item-card::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 3px;
+            background: var(--gradient-gold);
+            opacity: 0;
+            transition: opacity 0.18s ease;
+        }
+
+        .item-card:hover {
+            border-color: rgba(207, 185, 145, 0.4);
+            transform: translateX(3px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .item-card:hover::before {
+            opacity: 1;
+        }
+
+        .item-info h4 {
+            font-size: 0.98rem;
+            font-weight: 600;
+            margin: 0 0 0.2rem 0;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+        }
+
+        .item-info p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin: 0;
+        }
+
+        .item-macros {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .item-macros span {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 56px;
+            padding: 0.18rem 0.55rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .item-macros .p {
+            color: var(--macro-protein);
+            background: rgba(110, 231, 183, 0.08);
+            border-color: rgba(110, 231, 183, 0.2);
+        }
+
+        .item-macros .c {
+            color: var(--macro-carb);
+            background: rgba(125, 211, 252, 0.08);
+            border-color: rgba(125, 211, 252, 0.2);
+        }
+
+        .item-macros .f {
+            color: var(--macro-fat);
+            background: rgba(253, 224, 71, 0.08);
+            border-color: rgba(253, 224, 71, 0.2);
+        }
+
+        /* --- 11. CHART --- */
+        .chart-container {
+            position: relative;
+            max-width: 280px;
+            margin: 0.5rem auto;
+        }
+
+        /* --- 12. RESPONSIVE --- */
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+
+            .header h1 {
+                font-size: 1.75rem;
+            }
+
+            .macro-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .item-card {
+                grid-template-columns: 1fr;
+            }
+
+            .item-macros {
+                text-align: left;
+                flex-direction: row;
+                gap: 1rem;
+            }
+        }
+
+        /* --- 13. ACCESSIBILITY --- */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        *:focus-visible {
+            outline: 2px solid var(--purdue-gold);
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>Purdue Macro Finder</h1>
+        <p class="tagline">Hit your macros with what's actually being served on campus.</p>
+        <button id="settings-button" class="icon-button" aria-label="Open settings" title="Settings">
+            <!-- gear icon, inline svg -->
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+        </button>
+    </header>
+
+    <!-- Settings modal -->
+    <div id="settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="settings-title">Settings</h2>
+                <button id="settings-close" class="icon-button" aria-label="Close">×</button>
+            </div>
+
+            <div class="modal-body">
+                <h3>Gemini API Key</h3>
+                <p class="muted-small">
+                    Required for the <strong>AI Goal</strong> tab. Get a free one at
+                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com/app/apikey</a>.
+                </p>
+
+                <div id="settings-key-status" class="settings-key-status muted-small">
+                    Checking…
+                </div>
+
+                <label for="settings-key-input" class="visually-hidden">API key</label>
+                <input
+                    type="password"
+                    id="settings-key-input"
+                    placeholder="Paste your Gemini API key (starts with AIza...)"
+                    autocomplete="off"
+                    spellcheck="false">
+
+                <div id="settings-error" class="settings-error hidden"></div>
+
+                <div class="modal-actions">
+                    <button id="settings-save" class="cta-button">Save key</button>
+                </div>
+
+                <p class="muted-small footnote">
+                    The key is stored in <code>.env</code> next to <code>app.py</code> and never echoed back to the browser
+                    (only the last 4 characters are shown).
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <div class="controls-panel">
+            
+            <div class="tab-buttons" role="tablist" aria-label="Meal finding methods">
+                <button class="tab-button active" data-tab="ai" role="tab" aria-selected="true" aria-controls="ai">
+                    AI Goal
+                </button>
+                <button class="tab-button" data-tab="manual" role="tab" aria-selected="false" aria-controls="manual">
+                    Manual
+                </button>
+                <button class="tab-button" data-tab="featured" role="tab" aria-selected="false" aria-controls="featured">
+                    Right Now
+                </button>
+            </div>
+
+            <!-- Shared date picker — applies to both tabs -->
+            <div class="date-picker-row">
+                <label for="meal-date">Date</label>
+                <input type="date" id="meal-date" aria-label="Date to plan a meal for">
+                <button type="button" id="date-today-button" class="date-today-button" aria-label="Reset to today">Today</button>
+            </div>
+
+            <div id="ai" class="tab-content active" role="tabpanel" aria-labelledby="ai-tab">
+                <div id="ai-key-banner" class="ai-banner hidden">
+                    <div>
+                        <strong>AI features are off.</strong>
+                        <span>Add a free Gemini API key to enable goal-based meal planning.</span>
+                    </div>
+                    <button type="button" id="ai-banner-button" class="banner-button">Set up</button>
+                </div>
+                <form id="ai-form">
+                    <div class="card">
+                        <h2 class="form-header">Find a Meal by Goal</h2>
+                        <label for="ai-goal">What's your goal for this meal?</label>
+                        <textarea id="ai-goal" name="ai-goal" placeholder="e.g., 'High protein for muscle gain', 'Low carb meal', 'Pre-workout energy'"></textarea>
+                    </div>
+                </form>
+            </div>
+
+            <div id="manual" class="tab-content" role="tabpanel" aria-labelledby="manual-tab">
+                <form id="manual-form">
+                    
+                    <details class="collapsible-card" open>
+                        <summary>Target Macros</summary>
+                        <div class="macro-grid">
+                            <div>
+                                <label for="target-protein">Protein (g)</label>
+                                <input type="number" id="target-protein" value="40" min="0" max="500" aria-label="Target protein in grams">
+                            </div>
+                            <div>
+                                <label for="target-carbs">Carbs (g)</label>
+                                <input type="number" id="target-carbs" value="60" min="0" max="500" aria-label="Target carbs in grams">
+                            </div>
+                            <div>
+                                <label for="target-fat">Fat (g)</label>
+                                <input type="number" id="target-fat" value="20" min="0" max="500" aria-label="Target fat in grams">
+                            </div>
+                        </div>
+                    </details>
+                    
+                    <details class="collapsible-card" open>
+                        <summary>Dietary Filters</summary>
+                        <div class="filters">
+                            <label>
+                                <input type="checkbox" data-filter="Vegetarian" aria-label="Vegetarian only">
+                                Vegetarian
+                            </label>
+                            <label>
+                                <input type="checkbox" data-filter="Vegan" aria-label="Vegan only">
+                                Vegan
+                            </label>
+                            <label>
+                                <input type="checkbox" data-filter="No Gluten" aria-label="No gluten">
+                                No Gluten
+                            </label>
+                        </div>
+                    </details>
+
+                    <details class="collapsible-card">
+                        <summary>Meal Periods</summary>
+                        <div class="filters">
+                            <label>
+                                <input type="checkbox" name="meal_period" value="Breakfast" aria-label="Include breakfast">
+                                Breakfast <span class="meal-time">7-10 am</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" name="meal_period" value="Brunch" aria-label="Include brunch">
+                                Brunch <span class="meal-time">weekends, Hillenbrand</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" name="meal_period" value="Lunch" checked aria-label="Include lunch">
+                                Lunch <span class="meal-time">11 am - 2 pm</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" name="meal_period" value="Late Lunch" aria-label="Include late lunch">
+                                Late Lunch <span class="meal-time">2-5 pm</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" name="meal_period" value="Dinner" checked aria-label="Include dinner">
+                                Dinner <span class="meal-time">5-9 pm</span>
+                            </label>
+                        </div>
+                    </details>
+                </form>
+            </div>
+
+            <div id="featured" class="tab-content" role="tabpanel" aria-labelledby="featured-tab">
+                <div class="card">
+                    <h2 class="form-header">Featured Plate</h2>
+                    <p class="muted-small" style="margin-bottom: 0;">
+                        A balanced plate from a dining court that's serving right now.
+                        We pick a high-protein main, a complementary carb, and a side.
+                    </p>
+                </div>
+            </div>
+
+            <div class="cta-footer">
+                <button id="generate-button" class="cta-button" aria-label="Generate meal plan">
+                    Find My Meal 🍽️
+                </button>
+                <button id="reset-button" aria-label="Clear all inputs and results">
+                    Clear
+                </button>
+                <p id="status-label" role="status" aria-live="polite">Select a tab and generate a meal.</p>
+            </div>
+
+        </div>
+
+        <div class="results-panel">
+            
+            <div id="results-placeholder">
+                <div class="placeholder-icon" aria-hidden="true">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 11h18"></path>
+                        <path d="M5 11a7 7 0 0 1 14 0"></path>
+                        <path d="M3 14h18l-1.6 4.6a2 2 0 0 1-1.9 1.4H6.5a2 2 0 0 1-1.9-1.4L3 14z"></path>
+                    </svg>
+                </div>
+                <h3>Your meal awaits</h3>
+                <p>Pick a tab and we'll build a plate from today's dining-court menus.</p>
+            </div>
+
+            <div id="loading-spinner" class="hidden" role="status" aria-live="polite">
+                <div class="spinner"></div>
+                <p>Finding your meal...</p>
+            </div>
+
+            <div id="results-content" class="hidden">
+                <h2 id="result-header">Your Optimized Meal</h2>
+                
+                <div id="ai-explanation" class="card explanation-card hidden">
+                    <h3>AI Goal Interpretation</h3>
+                    <p id="ai-explanation-text"></p>
+                    <div id="ai-tags" class="ai-tags"></div>
+                </div>
+                
+                <div class="card">
+                    <h3>Macro Breakdown</h3>
+                    <div class="chart-container">
+                        <canvas id="macro-chart" aria-label="Macro breakdown pie chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Items</h3>
+                    <div id="meal-plan-items" role="list">
+                        </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- 1. CONFIGURATION ---
+            // Empty string = same-origin (works for local Flask AND a Render deploy
+            // that serves the frontend itself). Override at the URL with ?api=... if
+            // you ever want to point this static page at a different backend.
+            const API_OVERRIDE = new URLSearchParams(window.location.search).get('api');
+            const API_BASE_URL = API_OVERRIDE || '';
+            const RETRY_DELAY = 5000; // 5 seconds
+            const MAX_RETRIES = 3;
+            
+            // --- 2. GET REFERENCES TO HTML ELEMENTS ---
+            
+            // Tabs
+            const tabButtons = document.querySelectorAll('.tab-button');
+            const tabContents = document.querySelectorAll('.tab-content');
+            
+            // Forms
+            const aiForm = document.getElementById('ai-form');
+            const manualForm = document.getElementById('manual-form');
+            
+            // AI Form Inputs (UPDATED)
+            const aiGoal = document.getElementById('ai-goal');
+
+            // Shared date picker
+            const mealDate = document.getElementById('meal-date');
+            const dateTodayButton = document.getElementById('date-today-button');
+
+            // Manual Form Inputs
+            const targetProtein = document.getElementById('target-protein');
+            const targetCarbs = document.getElementById('target-carbs');
+            const targetFat = document.getElementById('target-fat');
+            const filterCheckboxes = document.querySelectorAll('.filters input[data-filter]');
+            const mealPeriodCheckboxes = document.querySelectorAll('input[name="meal_period"]');
+
+            // Initialize date picker to today's local date
+            const todayLocal = () => {
+                const d = new Date();
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                return `${yyyy}-${mm}-${dd}`;
+            };
+            mealDate.value = todayLocal();
+            dateTodayButton.addEventListener('click', () => {
+                mealDate.value = todayLocal();
+            });
+
+            // Buttons & Status
+            const generateButton = document.getElementById('generate-button');
+            const resetButton = document.getElementById('reset-button');
+            const statusLabel = document.getElementById('status-label');
+            
+            // Results Panel
+            const resultsPlaceholder = document.getElementById('results-placeholder');
+            const loadingSpinner = document.getElementById('loading-spinner');
+            const resultsContent = document.getElementById('results-content');
+            
+            // Result Content Parts
+            const resultHeader = document.getElementById('result-header');
+            const aiExplanation = document.getElementById('ai-explanation');
+            const aiExplanationText = document.getElementById('ai-explanation-text');
+            const chartCanvas = document.getElementById('macro-chart').getContext('2d');
+            const mealPlanItems = document.getElementById('meal-plan-items');
+            
+            // --- 3. GLOBAL STATE VARIABLES ---
+            let activeTab = 'ai';
+            let macroChart = null;
+            let currentRetryTimeout = null;
+            let retryCount = 0;
+
+            // --- 4. UTILITY FUNCTIONS ---
+            
+            function debounce(func, wait) {
+                let timeout;
+                return function executedFunction(...args) {
+                    const later = () => {
+                        clearTimeout(timeout);
+                        func(...args);
+                    };
+                    clearTimeout(timeout);
+                    timeout = setTimeout(later, wait);
+                };
+            }
+
+            // "2026-04-30" -> "Today" / "Tomorrow" / "Thu, Apr 30"
+            function formatDateLabel(yyyymmdd) {
+                if (!yyyymmdd) return '';
+                const [y, m, d] = yyyymmdd.split('-').map(Number);
+                const target = new Date(y, m - 1, d);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const diffDays = Math.round((target - today) / 86400000);
+                if (diffDays === 0) return 'Today';
+                if (diffDays === 1) return 'Tomorrow';
+                if (diffDays === -1) return 'Yesterday';
+                return target.toLocaleDateString(undefined, {
+                    weekday: 'short', month: 'short', day: 'numeric',
+                });
+            }
+
+            function validateMacroInput(value, macroName) {
+                const num = parseInt(value) || 0;
+                if (num < 0) {
+                    return { valid: false, message: `${macroName} cannot be negative` };
+                }
+                if (num > 500) {
+                    return { valid: false, message: `${macroName} seems unreasonably high` };
+                }
+                return { valid: true };
+            }
+
+            // --- 5. INPUT VALIDATION ---
+            
+            const validateInputs = debounce(() => {
+                if (activeTab === 'manual') {
+                    const protein = parseInt(targetProtein.value) || 0;
+                    const carbs = parseInt(targetCarbs.value) || 0;
+                    const fat = parseInt(targetFat.value) || 0;
+                    
+                    if (protein > 100) {
+                        statusLabel.textContent = '⚠️ High protein target';
+                        statusLabel.style.color = '#fbbf24'; // yellow
+                    } else if (protein === 0 && carbs === 0 && fat === 0) {
+                        statusLabel.textContent = 'Set your macro targets';
+                        statusLabel.style.color = '#a1a1aa'; // default
+                    } else {
+                        statusLabel.textContent = 'Ready to generate';
+                        statusLabel.style.color = '#a1a1aa'; // default
+                    }
+                } else if (activeTab === 'ai') {
+                    if (aiGoal.value.trim().length < 5) {
+                        statusLabel.textContent = 'Describe your meal goal';
+                        statusLabel.style.color = '#a1a1aa';
+                    } else {
+                        statusLabel.textContent = 'Ready to generate';
+                        statusLabel.style.color = '#a1a1aa';
+                    }
+                }
+            }, 500);
+            
+            targetProtein.addEventListener('input', validateInputs);
+            targetCarbs.addEventListener('input', validateInputs);
+            targetFat.addEventListener('input', validateInputs);
+            aiGoal.addEventListener('input', validateInputs);
+
+            // --- 6. EVENT LISTENERS ---
+
+            // Tab switching
+            tabButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    activeTab = button.dataset.tab;
+                    setActiveTab(activeTab);
+                    validateInputs(); // Update status label on tab switch
+                });
+            });
+
+            // Main "Generate" button
+            generateButton.addEventListener('click', () => {
+                // Clear any pending retries
+                if (currentRetryTimeout) {
+                    clearTimeout(currentRetryTimeout);
+                    currentRetryTimeout = null;
+                }
+                retryCount = 0;
+
+                if (activeTab === 'ai') {
+                    handleAiSuggestion();
+                } else if (activeTab === 'featured') {
+                    handleFeatured();
+                } else {
+                    handleManualSearch();
+                }
+            });
+            
+            // Reset button
+            resetButton.addEventListener('click', () => {
+                aiForm.reset();
+                manualForm.reset();
+
+                // Reset date to today
+                mealDate.value = todayLocal();
+
+                // Re-check default meal periods (Lunch + Dinner)
+                mealPeriodCheckboxes.forEach(cb => {
+                    cb.checked = (cb.value === 'Lunch' || cb.value === 'Dinner');
+                });
+                
+                // Destroy chart if exists
+                if (macroChart) {
+                    macroChart.destroy();
+                    macroChart = null;
+                }
+                
+                showPlaceholder('Select a tab and generate a meal.');
+                statusLabel.textContent = 'Cleared. Ready to go!';
+                statusLabel.style.color = '#a1a1aa';
+            });
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !generateButton.disabled && 
+                    (document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT')) {
+                    generateButton.click();
+                }
+                if (e.key === 'Escape') {
+                    resetButton.click();
+                }
+            });
+
+            // --- 7. CORE API FUNCTIONS ---
+
+            async function handleAiSuggestion() {
+                const goal = aiGoal.value.trim();
+                if (goal.length < 5) {
+                    showPlaceholder('Please describe your meal goal in a few words.');
+                    return;
+                }
+                if (!aiConfigured) {
+                    showPlaceholder('Add your Gemini API key in Settings to use AI mode.');
+                    openSettings();
+                    return;
+                }
+
+                const payload = {
+                    goal: goal,
+                    date: mealDate.value || todayLocal(),
+                };
+
+                showLoadingState('Asking AI to set targets...');
+                
+                try {
+                    const result = await makeApiCall('/api/suggest_meal', payload);
+                    displayResult(result, true); // We'll re-use the 'isAiResult' flag
+                    retryCount = 0;
+                } catch (error) {
+                    handleApiError(error);
+                }
+            }
+
+            async function handleManualSearch() {
+                // Validate inputs
+                const protein = parseInt(targetProtein.value) || 0;
+                const carbs = parseInt(targetCarbs.value) || 0;
+                const fat = parseInt(targetFat.value) || 0;
+                
+                const proteinValidation = validateMacroInput(protein, 'Protein');
+                if (!proteinValidation.valid) {
+                    showPlaceholder(proteinValidation.message);
+                    return;
+                }
+                
+                // Get selected meal periods
+                const selectedMeals = [];
+                mealPeriodCheckboxes.forEach(cb => {
+                    if (cb.checked) {
+                        selectedMeals.push(cb.value);
+                    }
+                });
+                
+                if (selectedMeals.length === 0) {
+                    showPlaceholder('Please select at least one meal period');
+                    return;
+                }
+
+                // Get dietary filters
+                const selectedFilters = {};
+                filterCheckboxes.forEach(cb => {
+                    if (cb.checked) {
+                        selectedFilters[cb.dataset.filter] = true;
+                    }
+                });
+
+                const payload = {
+                    targets: { p: protein, c: carbs, f: fat },
+                    meal_periods: selectedMeals,
+                    dietary_filters: selectedFilters,
+                    exclusion_list: [],
+                    date: mealDate.value || todayLocal(),
+                };
+
+                showLoadingState('Calculating the best meal plan...');
+
+                try {
+                    const result = await makeApiCall('/api/find_meal', payload);
+                    displayResult(result, false);
+                    retryCount = 0;
+                } catch (error) {
+                    handleApiError(error);
+                }
+            }
+            
+            // --- FEATURED PLATE ---
+
+            async function handleFeatured() {
+                showLoadingState('Looking at what\'s being served right now...');
+                try {
+                    const date = mealDate.value || todayLocal();
+                    const r = await fetch(`${API_BASE_URL}/api/featured?date=${encodeURIComponent(date)}`);
+                    const data = await r.json();
+                    if (!r.ok) {
+                        throw new Error(data.error || `Server error (status ${r.status}).`);
+                    }
+                    displayFeatured(data);
+                    retryCount = 0;
+                } catch (error) {
+                    handleApiError(error);
+                }
+            }
+
+            function displayFeatured(data) {
+                if (!data.currently_serving || !data.plate) {
+                    // Outside meal hours, or no plate could be built
+                    statusLabel.textContent = data.next_meal_hint || 'Nothing being served right now.';
+                    statusLabel.style.color = '#fbbf24';
+                    resultHeader.textContent = 'Nothing on the line right now';
+                    aiExplanation.classList.remove('hidden');
+                    aiExplanationText.textContent =
+                        data.next_meal_hint ||
+                        'No dining court is currently serving. Check back during a meal period.';
+                    document.getElementById('ai-tags').innerHTML = '';
+                    mealPlanItems.innerHTML = '';
+                    if (macroChart) { macroChart.destroy(); macroChart = null; }
+                    resultsPlaceholder.classList.add('hidden');
+                    loadingSpinner.classList.add('hidden');
+                    resultsContent.classList.remove('hidden');
+                    generateButton.disabled = false;
+                    generateButton.innerHTML = 'Refresh Featured Plate 🍽️';
+                    return;
+                }
+
+                // We have a plate — reuse the existing result rendering by shaping
+                // the payload like a meal-plan response, plus a custom header.
+                const result = {
+                    court: data.plate.court,
+                    meal_name: data.plate.meal_name,
+                    plan: data.plate.plan,
+                    totals: data.plate.totals,
+                    date: data.date,
+                    ai_explanation:
+                        `Featured at ${data.plate.court} ${data.plate.meal_name} right now. ` +
+                        `A balanced 3-item plate built from items currently being served.`,
+                    ai_meal_periods: [data.plate.meal_name],
+                    ai_dietary_filters: {},
+                };
+                displayResult(result, true);
+                resultHeader.textContent = `Featured Plate — ${data.plate.court}`;
+                generateButton.innerHTML = 'Refresh Featured Plate 🍽️';
+            }
+
+            async function makeApiCall(endpoint, payload) {
+                try {
+                    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        signal: AbortSignal.timeout(30000) // 30 second timeout
+                    });
+
+                    // --- START OF FIX ---
+                    
+                    // First, check if the response was successful.
+                    if (!response.ok) {
+                        if (response.status === 503) {
+                            throw new Error('503:still_loading');
+                        }
+                        if (response.status === 429) {
+                            throw new Error('429:rate_limit');
+                        }
+                        
+                        // Try to get the error text from the server
+                        const errorText = await response.text();
+                        
+                        // Try to parse it as JSON in case the server *did* send a JSON error
+                        try {
+                            const errorData = JSON.parse(errorText);
+                            throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                        } catch (e) {
+                            // This is where the HTML error is caught.
+                            console.error("Server returned non-JSON error:", errorText);
+                            throw new Error(`Server returned an invalid HTML response (Status: ${response.status}). Check console for details.`);
+                        }
+                    }
+                    
+                    // --- END OF FIX ---
+
+                    // If we get here, response.ok was true, so we can safely parse JSON.
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    
+                    return data;
+                    
+                } catch (error) {
+                    if (error.name === 'TimeoutError') {
+                        throw new Error('Request timed out. Please try again.');
+                    }
+                    throw error;
+                }
+            }
+
+            // --- 8. UI/DOM HELPER FUNCTIONS ---
+
+            function setActiveTab(tabName) {
+                tabButtons.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.tab === tabName);
+                });
+                tabContents.forEach(content => {
+                    content.classList.toggle('active', content.id === tabName);
+                });
+
+                // Show the AI key banner only on the AI tab when no key is set
+                if (aiKeyBanner) {
+                    if (tabName === 'ai' && !aiConfigured) {
+                        aiKeyBanner.classList.remove('hidden');
+                    } else {
+                        aiKeyBanner.classList.add('hidden');
+                    }
+                }
+
+                // Tailor the Generate button label per tab
+                if (tabName === 'featured') {
+                    generateButton.innerHTML = 'Show Featured Plate 🍽️';
+                } else if (tabName === 'ai') {
+                    generateButton.innerHTML = 'Find My Meal 🍽️';
+                } else {
+                    generateButton.innerHTML = 'Find My Meal 🍽️';
+                }
+
+                const tabNameText = (
+                    tabName === 'ai' ? 'AI Goal' :
+                    tabName === 'featured' ? 'Right Now' : 'Manual'
+                );
+                statusLabel.textContent = `Switched to ${tabNameText} tab.`;
+                statusLabel.style.color = '#a1a1aa';
+
+                // Auto-fetch the featured plate when switching to that tab
+                if (tabName === 'featured') {
+                    handleFeatured();
+                }
+            }
+
+            function showLoadingState(message) {
+                generateButton.disabled = true;
+                generateButton.innerHTML = '<span class="spinner-inline"></span> Finding...';
+                statusLabel.textContent = message;
+                statusLabel.style.color = '#a1a1aa';
+                
+                resultsPlaceholder.classList.add('hidden');
+                resultsContent.classList.add('hidden');
+        
+                loadingSpinner.classList.remove('hidden');
+            }
+
+            function showPlaceholder(message) {
+                statusLabel.textContent = message;
+                statusLabel.style.color = '#a1a1aa';
+                resultsPlaceholder.classList.remove('hidden');
+                resultsContent.classList.add('hidden');
+                loadingSpinner.classList.add('hidden');
+                generateButton.disabled = false;
+                generateButton.innerHTML = 'Find My Meal 🍽️';
+            }
+            
+            function handleApiError(error) {
+                // Handle rate limiting
+                if (error.message === '429:rate_limit') {
+                    showPlaceholder('⚠️ Too many requests. Please wait a minute and try again.');
+                    generateButton.disabled = true;
+                    setTimeout(() => {
+                        generateButton.disabled = false;
+                    }, 60000); // Re-enable after 1 minute
+                    return;
+                }
+                
+                // Handle 503 retry logic
+                if (error.message === '503:still_loading') {
+                    if (retryCount < MAX_RETRIES) {
+                        retryCount++;
+                        statusLabel.textContent = `Server is waking up... Retry ${retryCount}/${MAX_RETRIES} in 5s`;
+                        statusLabel.style.color = '#fbbf24'; // yellow
+                        
+                        currentRetryTimeout = setTimeout(() => {
+                            generateButton.click();
+                        }, RETRY_DELAY);
+                        return;
+                    } else {
+                        showPlaceholder('Server is taking too long to respond. Please try again later.');
+                        return;
+                    }
+                }
+                
+                // Show normal error
+                showPlaceholder(`Error: ${error.message}`);
+                statusLabel.style.color = '#ef4444'; // red
+            }
+
+            function displayResult(result, isAiResult) {
+                statusLabel.textContent = `✅ Found a meal at ${result.court}!`;
+                statusLabel.style.color = '#22c55e'; // green
+
+                // 1. Set Header — include the date being planned for, in a friendly format
+                const dateLabel = result.date ? formatDateLabel(result.date) : '';
+                resultHeader.textContent = dateLabel
+                    ? `Your Meal — ${dateLabel}`
+                    : 'Your Optimized Meal';
+                
+                // 2. Show/Hide AI Explanation Card
+                if (isAiResult && result.ai_explanation) {
+                    aiExplanationText.textContent = result.ai_explanation;
+
+                    // Render the AI's inferred tags (meal periods + filters) as chips
+                    const tagsContainer = document.getElementById('ai-tags');
+                    tagsContainer.innerHTML = '';
+                    const tags = [];
+                    (result.ai_meal_periods || []).forEach(m => tags.push(m));
+                    Object.keys(result.ai_dietary_filters || {}).forEach(f => tags.push(f));
+                    tags.forEach(label => {
+                        const chip = document.createElement('span');
+                        chip.className = 'ai-tag';
+                        chip.textContent = label;
+                        tagsContainer.appendChild(chip);
+                    });
+
+                    aiExplanation.classList.remove('hidden');
+                } else {
+                    aiExplanation.classList.add('hidden');
+                }
+                
+                // 3. Update Chart
+                updateMacroChart(result.totals);
+                
+                // 4. Build Item Cards
+                mealPlanItems.innerHTML = '';
+                result.plan.forEach(item => {
+                    const card = document.createElement('div');
+                    card.className = 'item-card';
+                    
+                    // Add animation
+                    card.style.opacity = '0';
+                    card.style.transform = 'translateY(10px)';
+                    
+                    card.innerHTML = `
+                        <div class="item-info">
+                            <h4>${item.name}</h4>
+                            <p>${item.serving_size || ''}</p>
+                        </div>
+                        <div class="item-macros">
+                            <span class="p">P: ${(item.p || 0).toFixed(0)}g</span>
+                            <span class="c">C: ${(item.c || 0).toFixed(0)}g</span>
+                            <span class="f">F: ${(item.f || 0).toFixed(0)}g</span>
+                        </div>
+                    `;
+                    
+                    mealPlanItems.appendChild(card);
+                    
+                    // Trigger animation
+                    setTimeout(() => {
+                        card.style.transition = 'all 0.3s ease';
+                        card.style.opacity = '1';
+                        card.style.transform = 'translateY(0)';
+                    }, 50);
+                });
+
+                // 5. Show results
+                resultsPlaceholder.classList.add('hidden');
+                loadingSpinner.classList.add('hidden');
+                resultsContent.classList.remove('hidden');
+                
+                generateButton.disabled = false;
+                generateButton.innerHTML = 'Find My Meal 🍽️';
+            }
+
+            function updateMacroChart(totals) {
+                const { p = 0, c = 0, f = 0 } = totals;
+                const calories = [p * 4, c * 4, f * 9];
+                const labels = [
+                    `Protein (${p.toFixed(0)}g)`, 
+                    `Carbs (${c.toFixed(0)}g)`, 
+                    `Fat (${f.toFixed(0)}g)`
+                ];
+
+                // Destroy existing chart
+                if (macroChart) {
+                    macroChart.destroy();
+                    macroChart = null;
+                }
+
+                macroChart = new Chart(chartCanvas, {
+                    type: 'pie',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: calories,
+                            backgroundColor: ['#6ee7b7', '#7dd3fc', '#fde047'],
+                            borderColor: '#3f3f46',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                labels: {
+                                    color: 'white',
+                                    font: { size: 12 }
+                                }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => {
+                                        let value = context.parsed;
+                                        let total = context.chart.getDatasetMeta(0).total;
+                                        let percentage = ((value / total)* 100).toFixed(0);
+                                        return `${context.label}: ${percentage}% of calories`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // --- SETTINGS / API KEY ---
+
+            const settingsModal = document.getElementById('settings-modal');
+            const settingsButton = document.getElementById('settings-button');
+            const settingsClose = document.getElementById('settings-close');
+            const settingsKeyStatus = document.getElementById('settings-key-status');
+            const settingsKeyInput = document.getElementById('settings-key-input');
+            const settingsSave = document.getElementById('settings-save');
+            const settingsError = document.getElementById('settings-error');
+            const aiKeyBanner = document.getElementById('ai-key-banner');
+            const aiBannerButton = document.getElementById('ai-banner-button');
+
+            let aiConfigured = false;
+
+            function openSettings() {
+                settingsModal.classList.remove('hidden');
+                settingsError.classList.add('hidden');
+                refreshSettingsStatus();
+                setTimeout(() => settingsKeyInput.focus(), 50);
+            }
+
+            function closeSettings() {
+                settingsModal.classList.add('hidden');
+            }
+
+            settingsButton.addEventListener('click', openSettings);
+            settingsClose.addEventListener('click', closeSettings);
+            aiBannerButton.addEventListener('click', openSettings);
+            settingsModal.addEventListener('click', (e) => {
+                if (e.target === settingsModal) closeSettings();
+            });
+
+            async function refreshSettingsStatus() {
+                try {
+                    const r = await fetch(`${API_BASE_URL}/api/settings`);
+                    const data = await parseJsonResponse(r);
+                    aiConfigured = !!data.ai_configured;
+                    if (data.ai_configured) {
+                        settingsKeyStatus.textContent = `✓ API key configured (ending in …${data.api_key_last4 || '????'}). Paste a new key below to replace it.`;
+                        settingsKeyStatus.classList.remove('unconfigured');
+                        settingsKeyStatus.classList.add('configured');
+                        aiKeyBanner.classList.add('hidden');
+                    } else {
+                        settingsKeyStatus.textContent = '⚠ No API key configured — AI tab is disabled.';
+                        settingsKeyStatus.classList.remove('configured');
+                        settingsKeyStatus.classList.add('unconfigured');
+                        if (activeTab === 'ai') {
+                            aiKeyBanner.classList.remove('hidden');
+                        }
+                    }
+                } catch (e) {
+                    settingsKeyStatus.textContent = e.message;
+                    settingsKeyStatus.classList.remove('configured');
+                    settingsKeyStatus.classList.add('unconfigured');
+                }
+            }
+
+            // Parse a fetch response defensively. If the server returns HTML
+            // (e.g. an error page from a stale or misrouted server), we surface a
+            // helpful message instead of "Unexpected token '<'".
+            async function parseJsonResponse(r) {
+                const text = await r.text();
+                try {
+                    return JSON.parse(text);
+                } catch (_) {
+                    const ct = r.headers.get('content-type') || '';
+                    const looksHtml = text.trim().toLowerCase().startsWith('<');
+                    if (looksHtml || ct.includes('html')) {
+                        throw new Error(
+                            `Server returned HTML instead of JSON (status ${r.status}). ` +
+                            `This usually means an older instance of the app is still running. ` +
+                            `On macOS, port 5000 is also used by AirPlay Receiver — try ` +
+                            `disabling it (System Settings → General → AirDrop & Handoff) ` +
+                            `or restart the app on a different port.`
+                        );
+                    }
+                    throw new Error(`Could not parse response (status ${r.status}).`);
+                }
+            }
+
+            settingsSave.addEventListener('click', async () => {
+                const key = settingsKeyInput.value.trim();
+                settingsError.classList.add('hidden');
+                if (!key) {
+                    settingsError.textContent = 'Please paste your API key.';
+                    settingsError.classList.remove('hidden');
+                    return;
+                }
+                settingsSave.disabled = true;
+                const originalText = settingsSave.textContent;
+                settingsSave.textContent = 'Validating with Google…';
+                try {
+                    const r = await fetch(`${API_BASE_URL}/api/settings/api_key`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ api_key: key }),
+                    });
+                    const data = await parseJsonResponse(r);
+                    if (!r.ok) {
+                        settingsError.textContent = data.error || `Server error (status ${r.status}).`;
+                        settingsError.classList.remove('hidden');
+                        return;
+                    }
+                    settingsKeyInput.value = '';
+                    aiConfigured = true;
+                    aiKeyBanner.classList.add('hidden');
+                    await refreshSettingsStatus();
+                    if (data.note) {
+                        settingsError.textContent = data.note;
+                        settingsError.classList.remove('hidden');
+                    } else {
+                        setTimeout(closeSettings, 600);
+                    }
+                } catch (e) {
+                    settingsError.textContent = e.message;
+                    settingsError.classList.remove('hidden');
+                } finally {
+                    settingsSave.disabled = false;
+                    settingsSave.textContent = originalText;
+                }
+            });
+
+            // Allow Enter key to submit when typing the API key
+            settingsKeyInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    settingsSave.click();
+                }
+            });
+
+            // Esc closes any modal
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && !settingsModal.classList.contains('hidden')) {
+                    e.stopPropagation();
+                    closeSettings();
+                }
+            }, true);
+
+            // --- 9. INITIALIZE ---
+            setActiveTab(activeTab);
+            validateInputs(); // Run once on load
+            refreshSettingsStatus(); // also surfaces the AI-tab banner if needed
+            
+            // Add accessibility attributes
+            generateButton.setAttribute('aria-label', 'Generate meal plan');
+            loadingSpinner.setAttribute('role', 'status');
+            loadingSpinner.setAttribute('aria-live', 'polite');
+
+            console.log('Purdue Macro Finder initialized successfully!');
+        });
+    </script>
+</body>
+</html>

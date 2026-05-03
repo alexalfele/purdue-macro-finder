@@ -1,0 +1,886 @@
+import threading
+import requests
+import json
+import re
+import random
+import math
+import os
+import time
+import logging
+from datetime import datetime, date as date_cls, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from google import genai
+from google.genai import types
+from config import Config
+
+logger = logging.getLogger(__name__)
+
+
+class MealFinder:
+    """Backend for fetching Purdue dining-court data and finding optimal meal plans.
+
+    Data is keyed by date (YYYY-MM-DD). Each date has its own in-memory snapshot
+    and disk cache file, loaded lazily on first request.
+    """
+
+    GRAPHQL_QUERY = """
+    query GetMenu($courtName: String!, $date: Date!) {
+      diningCourtByName(name: $courtName) {
+        name
+        dailyMenu(date: $date) {
+          meals { name, stations { name, items { displayName, item { traits { name }, nutritionFacts { name, label } } } } }
+        }
+      }
+    }
+    """
+
+    def __init__(self):
+        self.url = Config.PURDUE_API_URL
+        self.headers = {"Content-Type": "application/json"}
+        self.dining_courts = Config.DINING_COURTS
+
+        # Per-date menu snapshots: date_str -> {master, by_court, by_meal}
+        self.menu_by_date = {}
+        # Per-date AI target cache: date_str -> {goal: result}
+        self.ai_cache_by_date = {}
+        # Track which date AI caches we've already loaded from disk
+        self._ai_dates_loaded_from_disk = set()
+
+        # One lock for all menu data, one for all AI cache. Coarse but adequate.
+        self.data_lock = threading.Lock()
+        self.cache_lock = threading.Lock()
+
+        # Per-date load locks so two threads asking for the same date don't both
+        # hit the Purdue API. Created on demand.
+        self._date_load_locks = {}
+        self._load_locks_meta = threading.Lock()
+
+        self.api_key = os.environ.get("GEMINI_API_KEY")
+        if not self.api_key:
+            logger.warning("GEMINI_API_KEY not found. AI suggestions will be disabled.")
+            self.ai_client = None
+        else:
+            self.ai_client = genai.Client(api_key=self.api_key)
+
+    # --- API key management ---
+
+    def is_ai_configured(self):
+        return self.ai_client is not None
+
+    def api_key_masked(self):
+        """Returns last 4 chars of the configured key, or None."""
+        if not self.api_key or len(self.api_key) < 4:
+            return None
+        return self.api_key[-4:]
+
+    def set_api_key(self, key):
+        """Validates the given key with a tiny live call, then swaps in a new client.
+
+        Returns (ok: bool, error_message: Optional[str]). Does NOT persist to disk —
+        the caller decides where to store it.
+        """
+        key = (key or "").strip()
+        if not key:
+            return False, "API key is empty."
+        try:
+            client = genai.Client(api_key=key)
+            client.models.generate_content(
+                model=Config.GEMINI_MODEL,
+                contents="ping",
+                config=types.GenerateContentConfig(max_output_tokens=8),
+            )
+        except Exception as e:
+            logger.warning(f"API key validation failed: {e}")
+            msg = str(e)
+            if "API_KEY_INVALID" in msg or "API key not valid" in msg:
+                return False, "That API key was rejected by Google. Check for typos."
+            if "PERMISSION_DENIED" in msg:
+                return False, "Key was rejected (permission denied). Verify it has Gemini API access."
+            return False, f"Could not validate the key: {msg[:200]}"
+        self.api_key = key
+        self.ai_client = client
+        os.environ["GEMINI_API_KEY"] = key
+        return True, None
+
+    # --- date helpers ---
+
+    @staticmethod
+    def _today():
+        return datetime.now().strftime("%Y-%m-%d")
+
+    @staticmethod
+    def normalize_date(date_str):
+        """Returns a valid YYYY-MM-DD string, defaulting to today.
+
+        Raises ValueError if the input is malformed or unreasonable.
+        """
+        if not date_str:
+            return MealFinder._today()
+        try:
+            parsed = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValueError(f"Date must be YYYY-MM-DD, got {date_str!r}") from exc
+        today = date_cls.today()
+        # Allow up to a year back and 30 days forward — anything outside that
+        # window is almost certainly a mistake or stale state from the client.
+        if parsed < today - timedelta(days=365) or parsed > today + timedelta(days=30):
+            raise ValueError(
+                f"Date {parsed} is outside the supported window "
+                f"(1 year back to 30 days forward)."
+            )
+        return parsed.strftime("%Y-%m-%d")
+
+    def _menu_cache_path(self, date_str):
+        return f"{Config.CACHE_PREFIX_MENU}{date_str}.json"
+
+    def _ai_cache_path(self, date_str):
+        return f"{Config.CACHE_PREFIX_AI}{date_str}.json"
+
+    # --- numeric / scoring (unchanged from the original implementation) ---
+
+    def _get_numeric_value(self, label_str):
+        """Extracts a number from a label like '15g' -> 15.0."""
+        if not label_str:
+            return 0.0
+        numeric_part = re.search(r"[\d.]+", label_str)
+        return float(numeric_part.group(0)) if numeric_part else 0.0
+
+    def _calculate_score(self, meal_plan, targets, weights, penalties):
+        """Scores a meal plan; lower is better. Penalises under-protein / over-carb / over-fat."""
+        if not meal_plan:
+            return float("inf"), {}
+
+        totals = {
+            "p": sum(item.get("p", 0) for item in meal_plan),
+            "c": sum(item.get("c", 0) for item in meal_plan),
+            "f": sum(item.get("f", 0) for item in meal_plan),
+        }
+        errors = {
+            "p": totals["p"] - targets["p"],
+            "c": totals["c"] - targets["c"],
+            "f": totals["f"] - targets["f"],
+        }
+        if errors["p"] < 0:
+            errors["p"] *= penalties["under_p"]
+        if errors["c"] > 0:
+            errors["c"] *= penalties["over_c"]
+        if errors["f"] > 0:
+            errors["f"] *= penalties["over_f"]
+
+        score = (
+            weights["p"] * (errors["p"] ** 2)
+            + weights["c"] * (errors["c"] ** 2)
+            + weights["f"] * (errors["f"] ** 2)
+        ) ** 0.5
+        return score, totals
+
+    # --- menu loading (now date-parameterised) ---
+
+    def _fetch_court_menu(self, court, date_str, cached_data):
+        """Fetches menu data for a single court on a given date, using cache if present."""
+        menu_data = cached_data.get(court)
+        if menu_data:
+            return court, menu_data, False
+
+        try:
+            variables = {"courtName": court, "date": date_str}
+            resp = requests.post(
+                self.url,
+                json={"query": self.GRAPHQL_QUERY, "variables": variables},
+                headers=self.headers,
+                timeout=Config.API_TIMEOUT,
+            )
+            resp.raise_for_status()
+            return court, resp.json(), True
+        except requests.exceptions.Timeout:
+            logger.error(f"Timeout fetching menu for {court} on {date_str}")
+            return court, None, False
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching menu for {court} on {date_str}: {e}")
+            return court, None, False
+
+    @staticmethod
+    def _build_indices(item_list):
+        by_court, by_meal = {}, {}
+        for item in item_list:
+            by_court.setdefault(item["court"], []).append(item)
+            by_meal.setdefault(item["meal_name"], []).append(item)
+        return by_court, by_meal
+
+    def _get_load_lock(self, date_str):
+        """Returns a per-date lock; creates one on first use."""
+        with self._load_locks_meta:
+            lock = self._date_load_locks.get(date_str)
+            if lock is None:
+                lock = threading.Lock()
+                self._date_load_locks[date_str] = lock
+            return lock
+
+    def has_data(self, date_str):
+        with self.data_lock:
+            return date_str in self.menu_by_date
+
+    def _load_menu_for_date(self, date_str):
+        """Idempotent menu load for a specific date. Safe to call from multiple threads."""
+        if self.has_data(date_str):
+            return
+
+        # Per-date lock so concurrent requests for the same date don't double-fetch.
+        with self._get_load_lock(date_str):
+            if self.has_data(date_str):
+                return
+
+            cache_file = self._menu_cache_path(date_str)
+            cached_data, needs_to_save_cache = {}, False
+
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, "r") as f:
+                        cached_data = json.load(f).get("data", {})
+                    logger.info(f"Loaded {cache_file} from disk.")
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.error(f"Error loading cache file {cache_file}: {e}")
+
+            logger.info(f"Loading menu data for {date_str}...")
+            temp_master_list = []
+
+            with ThreadPoolExecutor() as executor:
+                futures = {
+                    executor.submit(self._fetch_court_menu, court, date_str, cached_data): court
+                    for court in self.dining_courts
+                }
+
+                for future in futures:
+                    court, menu_data, was_fetched = future.result()
+                    if was_fetched:
+                        cached_data[court] = menu_data
+                        needs_to_save_cache = True
+
+                    if not (menu_data and "data" in menu_data):
+                        continue
+                    dining_court = (menu_data.get("data") or {}).get("diningCourtByName")
+                    if not (dining_court and dining_court.get("dailyMenu")):
+                        continue
+
+                    for meal in dining_court["dailyMenu"]["meals"]:
+                        for station in meal["stations"]:
+                            for item_appearance in station["items"]:
+                                core_item = item_appearance.get("item")
+                                if not (core_item and core_item.get("nutritionFacts")):
+                                    continue
+
+                                macros = {"Protein": 0, "Total Carbohydrate": 0, "Total fat": 0}
+                                serving_size = ""
+                                for fact in core_item["nutritionFacts"]:
+                                    if fact["name"] in macros:
+                                        macros[fact["name"]] = self._get_numeric_value(
+                                            fact.get("label")
+                                        )
+                                    elif fact["name"] == "Serving Size":
+                                        serving_size = fact.get("label", "")
+
+                                if sum(macros.values()) <= 0:
+                                    continue
+
+                                traits = [
+                                    t["name"] for t in (core_item.get("traits") or []) if t
+                                ]
+                                temp_master_list.append({
+                                    "name": item_appearance["displayName"],
+                                    "p": macros["Protein"],
+                                    "c": macros["Total Carbohydrate"],
+                                    "f": macros["Total fat"],
+                                    "court": court,
+                                    "meal_name": meal["name"],
+                                    "traits": traits,
+                                    "serving_size": serving_size,
+                                })
+
+            by_court, by_meal = self._build_indices(temp_master_list)
+            with self.data_lock:
+                self.menu_by_date[date_str] = {
+                    "master": temp_master_list,
+                    "by_court": by_court,
+                    "by_meal": by_meal,
+                }
+
+            if needs_to_save_cache:
+                try:
+                    with open(cache_file, "w") as f:
+                        json.dump(
+                            {"timestamp": datetime.now().isoformat(), "data": cached_data}, f
+                        )
+                    logger.info(f"Saved menu cache to {cache_file}")
+                except IOError as e:
+                    logger.error(f"Error saving cache file {cache_file}: {e}")
+
+            logger.info(
+                f"Menu for {date_str}: {len(temp_master_list)} items, "
+                f"{len(by_court)} courts, {len(by_meal)} meals."
+            )
+
+    def ensure_loaded(self, date_str):
+        """Public entry point — loads the given date if not already loaded."""
+        self._load_menu_for_date(date_str)
+
+    # --- AI cache (per-date) ---
+
+    def _ensure_ai_cache_loaded(self, date_str):
+        """Lazily loads a date's AI target cache from disk, once."""
+        if date_str in self._ai_dates_loaded_from_disk:
+            return
+        path = self._ai_cache_path(date_str)
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as f:
+                    data = json.load(f)
+                with self.cache_lock:
+                    self.ai_cache_by_date[date_str] = data
+                logger.info(f"Loaded {len(data)} cached AI targets for {date_str}")
+            except (json.JSONDecodeError, TypeError, IOError) as e:
+                logger.error(f"Failed to read AI cache {path}: {e}")
+        self._ai_dates_loaded_from_disk.add(date_str)
+
+    def _save_ai_cache(self, date_str):
+        with self.cache_lock:
+            data_to_save = dict(self.ai_cache_by_date.get(date_str, {}))
+        try:
+            with open(self._ai_cache_path(date_str), "w") as f:
+                json.dump(data_to_save, f)
+        except IOError as e:
+            logger.error(f"Error saving AI cache for {date_str}: {e}")
+
+    # --- AI suggestion ---
+
+    _AI_RESPONSE_SCHEMA = {
+        "type": "OBJECT",
+        "required": ["p", "c", "f", "meal_periods", "explanation"],
+        "properties": {
+            "p": {"type": "INTEGER", "description": "Target grams of protein (0-200)."},
+            "c": {"type": "INTEGER", "description": "Target grams of carbohydrates (0-200)."},
+            "f": {"type": "INTEGER", "description": "Target grams of fat (0-100)."},
+            "meal_periods": {
+                "type": "ARRAY",
+                "description": "Which meal periods make sense for this goal.",
+                "items": {
+                    "type": "STRING",
+                    "enum": ["Breakfast", "Brunch", "Lunch", "Late Lunch", "Dinner"],
+                },
+            },
+            "dietary_filters": {
+                "type": "OBJECT",
+                "description": "Dietary filters explicitly implied by the goal. Omit when not implied.",
+                "properties": {
+                    "Vegetarian": {"type": "BOOLEAN"},
+                    "Vegan": {"type": "BOOLEAN"},
+                    "No Gluten": {"type": "BOOLEAN"},
+                },
+            },
+            "explanation": {
+                "type": "STRING",
+                "description": "A 1-2 sentence rationale tied to the menu summary.",
+            },
+        },
+    }
+
+    _AI_SYSTEM_INSTRUCTION = (
+        "You are a sports-nutrition assistant for Purdue University students choosing a "
+        "single meal at a campus dining court. You translate the student's goal into "
+        "concrete macro targets (protein/carbs/fat in grams), pick which meal periods "
+        "fit the goal (Breakfast 7-10am, Brunch ~10am-2pm weekend, Lunch 11am-2pm, "
+        "Late Lunch 2-5pm, Dinner 5-9pm), and infer dietary filters only when the goal "
+        "explicitly implies them. Anchor "
+        "your numbers to what is actually on the menu for the chosen date (a summary is "
+        "provided). Be realistic: a single dining-court meal usually lands in the 20-60g "
+        "protein, 30-90g carb, 10-30g fat range. Keep the explanation concise and grounded."
+    )
+
+    def _build_menu_summary(self, date_str, max_items_per_meal=8):
+        """Compact text summary of the chosen date's menu, for the AI prompt.
+
+        Surfaces top high-protein items per meal period so the model can calibrate
+        targets to what's actually realistic that day instead of inventing numbers.
+        """
+        with self.data_lock:
+            data = self.menu_by_date.get(date_str)
+            items = list(data["master"]) if data else []
+
+        if not items:
+            return "(menu data not yet loaded)"
+
+        by_meal = {}
+        for item in items:
+            by_meal.setdefault(item["meal_name"], []).append(item)
+
+        lines = []
+        for meal in Config.MEAL_PERIODS:
+            meal_items = by_meal.get(meal)
+            if not meal_items:
+                continue
+            top = sorted(meal_items, key=lambda i: i.get("p", 0), reverse=True)[
+                :max_items_per_meal
+            ]
+            sample = ", ".join(
+                f"{i['name']} (P{int(i.get('p', 0))}/C{int(i.get('c', 0))}/F{int(i.get('f', 0))} @ {i['court']})"
+                for i in top
+            )
+            lines.append(f"{meal} ({len(meal_items)} items): {sample}")
+        return "\n".join(lines) if lines else "(no items in menu data)"
+
+    def _get_macros_from_ai_api(self, user_goal, date_str, is_retry=False):
+        """Calls Gemini with structured output. SDK guarantees parseable JSON."""
+        if not self.ai_client:
+            return {"error": "AI service is not configured."}
+
+        menu_summary = self._build_menu_summary(date_str)
+        prompt = (
+            f"Student's goal: \"{user_goal}\"\n"
+            f"Date being planned for: {date_str}\n\n"
+            f"Menu summary for that date (top high-protein items per meal period):\n"
+            f"{menu_summary}\n\n"
+            "Return targets the optimizer can hit with the items above. Choose meal "
+            "periods that fit the goal. Only set a dietary filter when the goal makes "
+            "it explicit (e.g. 'vegan')."
+        )
+
+        try:
+            response = self.ai_client.models.generate_content(
+                model=Config.GEMINI_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self._AI_SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    response_schema=self._AI_RESPONSE_SCHEMA,
+                    temperature=0.4,
+                ),
+            )
+
+            ai_data = json.loads(response.text)
+            targets = {
+                "p": int(ai_data["p"]),
+                "c": int(ai_data["c"]),
+                "f": int(ai_data["f"]),
+            }
+            meal_periods = [
+                m for m in (ai_data.get("meal_periods") or []) if m in Config.MEAL_PERIODS
+            ] or ["Lunch", "Dinner"]
+            raw_filters = ai_data.get("dietary_filters") or {}
+            dietary_filters = {k: bool(v) for k, v in raw_filters.items() if v}
+
+            return {
+                "targets": targets,
+                "meal_periods": meal_periods,
+                "dietary_filters": dietary_filters,
+                "explanation": ai_data.get("explanation", "AI analyzed your goal."),
+            }
+
+        except Exception as e:
+            if "429" in str(e) and not is_retry:
+                logger.warning(f"Rate limit hit for AI goal: '{user_goal}', retrying...")
+                time.sleep(random.randint(Config.RETRY_DELAY_MIN, Config.RETRY_DELAY_MAX))
+                return self._get_macros_from_ai_api(user_goal, date_str, is_retry=True)
+            logger.error(f"Gemini API error for goal '{user_goal}' on {date_str}: {e}")
+            return {"error": "The AI failed to interpret your goal. Try rephrasing."}
+
+    def get_macros_from_ai(self, user_goal, date_str=None):
+        """Public AI entry point: cached per-(date, goal). Loads menu lazily if needed."""
+        date_str = self.normalize_date(date_str)
+        self.ensure_loaded(date_str)
+        self._ensure_ai_cache_loaded(date_str)
+
+        cache_key = user_goal.strip().lower()
+        with self.cache_lock:
+            day_cache = self.ai_cache_by_date.setdefault(date_str, {})
+            if cache_key in day_cache:
+                logger.info(f"AI target cache HIT for ({date_str}, '{user_goal}')")
+                return day_cache[cache_key]
+
+        logger.info(f"AI target cache MISS for ({date_str}, '{user_goal}'). Calling API...")
+        result = self._get_macros_from_ai_api(user_goal, date_str)
+
+        if "error" not in result:
+            with self.cache_lock:
+                self.ai_cache_by_date.setdefault(date_str, {})[cache_key] = result
+            self._save_ai_cache(date_str)
+
+        return result
+
+    def start_background_loaders(self):
+        """Preloads today's menu data + AI cache so the first user request is instant."""
+        today = self._today()
+        logger.info("Starting background loaders for today...")
+        threading.Thread(
+            target=self._load_menu_for_date,
+            args=(today,),
+            daemon=True,
+            name="MenuLoader",
+        ).start()
+        threading.Thread(
+            target=self._ensure_ai_cache_loaded,
+            args=(today,),
+            daemon=True,
+            name="AICacheLoader",
+        ).start()
+
+    # --- meal-finding algorithm ---
+
+    def _run_optimization_for_court(self, available_items, targets, weights, penalties):
+        """Simulated annealing within a single court's items."""
+        if len(available_items) < Config.MIN_ITEMS:
+            return None, float("inf"), {}
+
+        best_solution, best_score, best_totals = None, float("inf"), {}
+        temp = Config.INITIAL_TEMP
+        cooling_rate = Config.COOLING_RATE
+        iterations = Config.ITERATIONS
+
+        initial_size = min(Config.INITIAL_ITEMS, len(available_items))
+
+        # Heuristic seed: start with the two highest-protein items, then random fill.
+        sorted_by_protein = sorted(available_items, key=lambda x: x.get("p", 0), reverse=True)
+        current_solution = sorted_by_protein[:2]
+        items_needed = initial_size - len(current_solution)
+        if items_needed > 0:
+            remaining_pool = [i for i in available_items if i not in current_solution]
+            if remaining_pool:
+                current_solution += random.sample(
+                    remaining_pool, min(items_needed, len(remaining_pool))
+                )
+
+        for _ in range(iterations):
+            if temp <= 1:
+                break
+
+            neighbor = list(current_solution)
+            action = random.choice(["swap", "add", "remove"])
+
+            if action == "swap" and len(neighbor) > 1:
+                neighbor[random.randrange(len(neighbor))] = random.choice(available_items)
+            elif action == "add" and len(neighbor) < Config.MAX_ITEMS:
+                possible_adds = [i for i in available_items if i not in neighbor]
+                if possible_adds:
+                    neighbor.append(random.choice(possible_adds))
+            elif action == "remove" and len(neighbor) > Config.MIN_ITEMS:
+                neighbor.pop(random.randrange(len(neighbor)))
+
+            current_score, _ = self._calculate_score(
+                current_solution, targets, weights, penalties
+            )
+            neighbor_score, neighbor_totals = self._calculate_score(
+                neighbor, targets, weights, penalties
+            )
+
+            if neighbor_score < current_score or random.random() < math.exp(
+                (current_score - neighbor_score) / temp
+            ):
+                current_solution = neighbor
+
+            if neighbor_score < best_score:
+                best_score = neighbor_score
+                best_totals = neighbor_totals
+                best_solution = neighbor
+
+            temp *= cooling_rate
+
+        return best_solution, best_score, best_totals
+
+    def find_best_meal(
+        self,
+        targets,
+        meal_periods_to_check,
+        exclusion_list=None,
+        dietary_filters=None,
+        date_str=None,
+    ):
+        """Finds the best meal plan for the given date across all dining courts."""
+        if exclusion_list is None:
+            exclusion_list = []
+        if dietary_filters is None:
+            dietary_filters = {}
+
+        date_str = self.normalize_date(date_str)
+        self.ensure_loaded(date_str)
+
+        with self.data_lock:
+            data = self.menu_by_date.get(date_str)
+            if not data:
+                logger.warning(f"No menu data for {date_str}")
+                return None
+            snapshot_items = list(data["master"])
+
+        if not snapshot_items:
+            logger.warning(f"Menu for {date_str} is empty (Purdue may not have published it).")
+            return None
+
+        # Apply dietary filters
+        filtered = []
+        for item in snapshot_items:
+            traits = item.get("traits", [])
+            if dietary_filters.get("Vegetarian") and "Vegetarian" not in traits:
+                continue
+            if dietary_filters.get("Vegan") and "Vegan" not in traits:
+                continue
+            if dietary_filters.get("No Gluten") and "Contains Gluten" in traits:
+                continue
+            filtered.append(item)
+
+        available_courts = {
+            item["court"]
+            for item in filtered
+            if item["name"] not in exclusion_list and item["meal_name"] in meal_periods_to_check
+        }
+
+        if not available_courts:
+            logger.warning(
+                f"No courts available for date={date_str} meals={meal_periods_to_check} "
+                f"filters={dietary_filters}"
+            )
+            return None
+
+        overall_best_solution, overall_best_score = None, float("inf")
+        weights, penalties = Config.WEIGHTS, Config.PENALTIES
+
+        for court in available_courts:
+            court_items = [
+                item
+                for item in filtered
+                if item["court"] == court
+                and item["name"] not in exclusion_list
+                and item["meal_name"] in meal_periods_to_check
+            ]
+            solution, score, totals = self._run_optimization_for_court(
+                court_items, targets, weights, penalties
+            )
+            if solution and score < overall_best_score:
+                overall_best_score = score
+                overall_best_solution = {
+                    "score": score,
+                    "court": court,
+                    "meal_name": solution[0]["meal_name"],
+                    "plan": solution,
+                    "totals": totals,
+                    "date": date_str,
+                }
+
+        return overall_best_solution
+
+    # --- featured plate ("right now") ---
+
+    # Approximate dining-court hours (Purdue's API doesn't expose this; these
+    # match what's printed on the dining-court signage). The list of meal-period
+    # tuples per hour band. Brunch overlaps with breakfast/lunch on weekends.
+    @staticmethod
+    def _meal_periods_at(now):
+        """Returns (currently_serving: List[str], next_label: Optional[str]).
+
+        currently_serving is a list of meal-period names that are open right now.
+        next_label is "Lunch starts at 11 am" style hint when nothing is open.
+        """
+        h = now.hour + now.minute / 60
+        is_weekend = now.weekday() >= 5
+
+        currently = []
+        if 7 <= h < 11:
+            currently.append("Breakfast")
+        if is_weekend and 9 <= h < 14:
+            currently.append("Brunch")
+        if 11 <= h < 14:
+            currently.append("Lunch")
+        if 14 <= h < 17:
+            currently.append("Late Lunch")
+        if 17 <= h < 21:
+            currently.append("Dinner")
+
+        if currently:
+            return currently, None
+
+        # Nothing open — figure out the next thing
+        if h < 7:
+            return [], "Breakfast starts at 7 am"
+        if 10 <= h < 11:
+            return [], "Lunch starts at 11 am"
+        if 14 <= h < 14:  # never reached but keeps logic readable
+            return [], "Late Lunch starts at 2 pm"
+        if 21 <= h:
+            return [], "Breakfast starts at 7 am tomorrow"
+        return [], "Next meal is starting soon"
+
+    def _build_featured_plate(self, items, court, meal_name):
+        """Picks 3 complementary items from a single court+meal pool: a high-protein
+        main, a complementary carb, and a low-fat side. Returns None if we can't
+        assemble a sensible plate."""
+        if len(items) < 2:
+            return None
+
+        # Deduplicate by name (Purdue often lists the same item at multiple stations)
+        seen, deduped = set(), []
+        for it in items:
+            if it["name"] not in seen:
+                seen.add(it["name"])
+                deduped.append(it)
+        items = deduped
+
+        if not items:
+            return None
+
+        # 1. Main: highest protein
+        sorted_by_p = sorted(items, key=lambda i: i.get("p", 0), reverse=True)
+        main = sorted_by_p[0]
+        plate = [main]
+
+        # 2. Carb: highest carbs that's not the main and adds some carbs
+        carb_candidates = [
+            i for i in items
+            if i["name"] != main["name"] and i.get("c", 0) >= 10
+        ]
+        if carb_candidates:
+            carb = sorted(carb_candidates, key=lambda i: i.get("c", 0), reverse=True)[0]
+            plate.append(carb)
+
+        # 3. Side/veggie: prefer real food, low-fat, with actual substance.
+        # Filter out condiments — Purdue's API marks them with serving sizes
+        # like "Tablespoon" or "Teaspoon", which is a clean tell.
+        used = {p["name"] for p in plate}
+        condiment_units = ("tablespoon", "teaspoon", "tbsp", "tsp", "packet", "pkt")
+        # Anything whose *name* contains one of these is an auxiliary, not a side dish.
+        condiment_words = ("sauce", "dressing", "syrup", "spread", "topping",
+                           "dip", "marinade", "glaze", "vinaigrette", "salsa",
+                           "ketchup", "mustard", "mayo", "butter")
+
+        def _is_condiment(it):
+            ss = (it.get("serving_size") or "").lower()
+            name = (it.get("name") or "").lower()
+            if any(u in ss for u in condiment_units):
+                return True
+            if any(w in name for w in condiment_words):
+                return True
+            return False
+
+        def _is_substantial(it):
+            return (it.get("p", 0) + it.get("c", 0) + it.get("f", 0)) >= 8
+
+        substantial_sides = [
+            i for i in items
+            if i["name"] not in used
+            and i.get("f", 0) <= 8
+            and _is_substantial(i)
+            and not _is_condiment(i)
+        ]
+        # Bias toward items tagged Vegetarian/Vegan
+        substantial_sides.sort(
+            key=lambda i: (
+                ("Vegan" in i.get("traits", []) or "Vegetarian" in i.get("traits", [])),
+                -i.get("f", 0),
+            ),
+            reverse=True,
+        )
+        if substantial_sides:
+            plate.append(substantial_sides[0])
+        # If no substantial side exists, ship the 2-item plate rather than
+        # padding with a condiment.
+
+        if len(plate) < 2:
+            return None
+
+        totals = {
+            "p": sum(i.get("p", 0) for i in plate),
+            "c": sum(i.get("c", 0) for i in plate),
+            "f": sum(i.get("f", 0) for i in plate),
+        }
+
+        return {
+            "court": court,
+            "meal_name": meal_name,
+            "plan": plate,
+            "totals": totals,
+        }
+
+    def featured_plate(self, date_str=None, now=None):
+        """Returns the featured plate for the current moment, or info about the next
+        meal if nothing is currently being served.
+
+        Shape:
+          {
+            currently_serving: bool,
+            meal_periods: [...],          # what's open right now
+            next_meal_hint: "Lunch starts at 11 am",  # only when not currently_serving
+            plate: { court, meal_name, plan, totals },  # only when currently_serving
+            date: "YYYY-MM-DD"
+          }
+        """
+        date_str = self.normalize_date(date_str)
+        self.ensure_loaded(date_str)
+        now = now or datetime.now()
+
+        currently, next_hint = self._meal_periods_at(now)
+
+        # If the requested date is not "today" we still show the result, but
+        # the time-of-day check is meaningless for a different date.
+        is_today = date_str == self._today()
+        if not is_today:
+            # For non-today dates, just feature any meal that has items and pick
+            # the one most likely to be relevant by hour-of-day.
+            currently = currently or ["Lunch", "Dinner", "Late Lunch", "Brunch", "Breakfast"]
+            next_hint = None
+
+        if not currently:
+            return {
+                "currently_serving": False,
+                "meal_periods": [],
+                "next_meal_hint": next_hint or "No meal currently being served.",
+                "plate": None,
+                "date": date_str,
+            }
+
+        with self.data_lock:
+            data = self.menu_by_date.get(date_str)
+            items = list(data["master"]) if data else []
+
+        if not items:
+            return {
+                "currently_serving": False,
+                "meal_periods": currently,
+                "next_meal_hint": "Menu data is empty for this date.",
+                "plate": None,
+                "date": date_str,
+            }
+
+        # Group available items by (court, meal) and pick the combination with
+        # the most items — gives the algorithm room to build a balanced plate.
+        groups = {}
+        for item in items:
+            if item["meal_name"] not in currently:
+                continue
+            groups.setdefault((item["court"], item["meal_name"]), []).append(item)
+
+        if not groups:
+            return {
+                "currently_serving": True,
+                "meal_periods": currently,
+                "next_meal_hint": None,
+                "plate": None,
+                "date": date_str,
+            }
+
+        # Sort by item count (descending) and try to build a plate from each in
+        # turn — if one court has too few usable items, fall through to the next.
+        for (court, meal_name), pool in sorted(
+            groups.items(), key=lambda kv: len(kv[1]), reverse=True
+        ):
+            plate = self._build_featured_plate(pool, court, meal_name)
+            if plate:
+                return {
+                    "currently_serving": True,
+                    "meal_periods": currently,
+                    "next_meal_hint": None,
+                    "plate": plate,
+                    "date": date_str,
+                }
+
+        return {
+            "currently_serving": True,
+            "meal_periods": currently,
+            "next_meal_hint": None,
+            "plate": None,
+            "date": date_str,
+        }
