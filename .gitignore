@@ -1,11 +1,9 @@
 # --- Secrets ---
 .env
 .env.*
-!.env.example
 
 # --- Generated / cache ---
 menu_cache_*.json
-ai_cache_*.json
 __pycache__/
 *.pyc
 *.pyo

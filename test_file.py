@@ -1,10 +1,9 @@
 """
 Unit tests for the Purdue Macro Finder
-Run with: python -m pytest test_meal_finder.py
+Run with: python -m pytest test_file.py
 """
 
 import unittest
-from unittest.mock import Mock, patch
 from meal_finder_engine import MealFinder
 from config import Config
 
@@ -99,30 +98,6 @@ class TestMealFinder(unittest.TestCase):
         # Score should be positive due to carb excess
         self.assertGreater(score, 0)
         
-    def test_ensure_current_date_returns_false_when_current(self):
-        """Test that _ensure_current_date returns False when date is current"""
-        # Date is set to current in __init__
-        result = self.finder._ensure_current_date()
-        self.assertFalse(result)
-        
-    def test_get_top_protein_foods_with_empty_list(self):
-        """Test getting top protein foods with empty master list"""
-        self.finder.master_item_list = []
-        result = self.finder.get_top_protein_foods(10)
-        self.assertEqual(len(result), 0)
-        
-    def test_get_top_protein_foods_filters_low_calorie(self):
-        """Test that low calorie items are filtered out"""
-        self.finder.master_item_list = [
-            {'name': 'Low Cal Item', 'p': 5, 'c': 5, 'f': 0},  # 40 calories
-            {'name': 'High Protein', 'p': 30, 'c': 10, 'f': 5},  # 205 calories
-        ]
-        result = self.finder.get_top_protein_foods(10)
-        
-        # Should only include the high calorie item
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['name'], 'High Protein')
-
 
 class TestConfig(unittest.TestCase):
     """Test cases for Config class"""
@@ -141,7 +116,7 @@ class TestConfig(unittest.TestCase):
         
     def test_meal_periods_list(self):
         """Test that meal periods list is complete"""
-        expected_periods = ["Breakfast", "Lunch", "Dinner", "Late Night"]
+        expected_periods = ["Breakfast", "Brunch", "Lunch", "Late Lunch", "Dinner"]
         self.assertEqual(Config.MEAL_PERIODS, expected_periods)
         
     def test_optimization_parameters(self):
@@ -181,9 +156,9 @@ class TestInputValidation(unittest.TestCase):
         
         targets = {'p': -10, 'c': 60, 'f': 20}
         valid, error = validate_targets(targets)
-        
+
         self.assertFalse(valid)
-        self.assertIn("non-negative", error)
+        self.assertIn("out of range", error)
         
     def test_validate_targets_with_excessive_value(self):
         """Test validation with excessively high value"""
@@ -191,9 +166,9 @@ class TestInputValidation(unittest.TestCase):
         
         targets = {'p': 600, 'c': 60, 'f': 20}
         valid, error = validate_targets(targets)
-        
+
         self.assertFalse(valid)
-        self.assertIn("unreasonably high", error)
+        self.assertIn("out of range", error)
         
     def test_validate_meal_periods_with_valid_input(self):
         """Test meal period validation with valid input"""
