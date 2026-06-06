@@ -12,5 +12,3 @@ services:
         value: 3.11.9
       - key: ENABLE_KEEP_ALIVE
         value: "true"
-      - key: GEMINI_API_KEY
-        sync: false   # Set this manually in the Render dashboard. Never commit it.

@@ -37,45 +37,6 @@ def _load_dotenv(path):
         logging.warning(f"Could not read {path}: {e}")
 
 
-def _write_dotenv_kv(path, key, value):
-    """Idempotently update or insert KEY=VALUE in a .env-style file. Atomic write,
-    chmods to 0600. Returns True on success, False on filesystem failure."""
-    lines = []
-    if os.path.exists(path):
-        try:
-            with open(path) as f:
-                lines = f.readlines()
-        except OSError:
-            lines = []
-
-    new_line = f"{key}={value}\n"
-    found = False
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith(f"{key}=") or stripped.startswith(f"{key} ="):
-            lines[i] = new_line
-            found = True
-            break
-    if not found:
-        if lines and not lines[-1].endswith("\n"):
-            lines[-1] = lines[-1] + "\n"
-        lines.append(new_line)
-
-    tmp = path + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            f.writelines(lines)
-        os.replace(tmp, path)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-        return True
-    except OSError as e:
-        logging.warning(f"Could not write {path}: {e}")
-        return False
-
-
 _load_dotenv(ENV_FILE)
 
 app = Flask(__name__, static_folder=APP_ROOT, static_url_path="")
@@ -191,50 +152,6 @@ def health_check():
     return jsonify({"status": "healthy", "message": "Purdue Macro Finder API is running."})
 
 
-@app.route("/api/settings", methods=["GET"])
-def api_settings_get():
-    """Returns whether AI is configured. Never echoes the key — only the last 4 chars."""
-    engine = get_engine()
-    return jsonify({
-        "ai_configured": engine.is_ai_configured(),
-        "api_key_last4": engine.api_key_masked(),
-    })
-
-
-@app.route("/api/settings/api_key", methods=["POST"])
-@limiter.limit("5 per minute")
-def api_settings_set_key():
-    """Validates the key with a tiny live Gemini call, then persists to .env.
-
-    Note: in a multi-tenant deployment this endpoint would need auth. For this
-    project it's intended for the owner's local/personal use; in production set
-    the key via the platform's env var dashboard instead.
-    """
-    engine = get_engine()
-    data = request.json or {}
-    key = (data.get("api_key") or "").strip()
-
-    if not key:
-        return jsonify({"error": "api_key is required"}), 400
-    if len(key) < 20 or len(key) > 200:
-        return jsonify({"error": "That doesn't look like a valid API key (wrong length)."}), 400
-
-    ok, err = engine.set_api_key(key)
-    if not ok:
-        return jsonify({"error": err}), 400
-
-    persisted = _write_dotenv_kv(ENV_FILE, "GEMINI_API_KEY", key)
-    return jsonify({
-        "ok": True,
-        "ai_configured": True,
-        "api_key_last4": engine.api_key_masked(),
-        "persisted": persisted,
-        "note": None if persisted else (
-            "Key is active for this server but couldn't be written to .env "
-            "(filesystem read-only?). It will be lost on restart."
-        ),
-    })
-
 # --- 7. API ENDPOINTS ---
 @app.route("/api/find_meal", methods=["POST"])
 @limiter.limit(limit_minute)
@@ -306,81 +223,6 @@ def api_featured():
         app.logger.error(f"Error in /api/featured: {e}")
         return jsonify({"error": "An internal error occurred."}), 500
 
-
-@app.route("/api/suggest_meal", methods=["POST"])
-@limiter.limit(limit_minute)
-@limiter.limit(limit_hour)
-@limiter.limit(limit_day)
-def api_suggest_meal():
-    engine = get_engine()
-    try:
-        data = request.json or {}
-        goal = data.get('goal')
-        raw_date = data.get('date')
-
-        if not goal or len(goal) < 5:
-            return jsonify({"error": "A descriptive goal is required."}), 400
-
-        try:
-            date_str = engine.normalize_date(raw_date)
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-        app.logger.info(f"AI Goal received: '{goal}' (date={date_str})")
-        ai_result = engine.get_macros_from_ai(goal, date_str=date_str)
-
-        if ai_result.get("error"):
-            return jsonify({"error": ai_result.get("error")}), 500
-
-        targets = ai_result.get("targets")
-        ai_explanation = ai_result.get("explanation", "AI analyzed your goal.")
-        ai_meal_periods = ai_result.get("meal_periods") or ["Lunch", "Dinner"]
-        ai_dietary_filters = ai_result.get("dietary_filters") or {}
-
-        app.logger.info(
-            f"AI plan: targets={targets} meals={ai_meal_periods} filters={ai_dietary_filters}"
-        )
-
-        valid, error = validate_targets(targets)
-        if not valid:
-            app.logger.error(f"AI returned invalid targets: {error}")
-            return jsonify({"error": "The AI provided an invalid target. Please rephrase your goal."}), 500
-
-        valid, error = validate_meal_periods(ai_meal_periods)
-        if not valid:
-            app.logger.warning(f"AI returned invalid meal periods, falling back: {error}")
-            ai_meal_periods = ["Lunch", "Dinner"]
-
-        optimized_meal = engine.find_best_meal(
-            targets=targets,
-            meal_periods_to_check=ai_meal_periods,
-            exclusion_list=[],
-            dietary_filters=ai_dietary_filters,
-            date_str=date_str,
-        )
-
-        if optimized_meal is None:
-            return jsonify({
-                "error": (
-                    f"No meal plan found for {date_str}. AI set targets: "
-                    f"P:{targets['p']} C:{targets['c']} F:{targets['f']} "
-                    f"across {', '.join(ai_meal_periods)}. Try a different goal or date."
-                )
-            }), 404
-
-        optimized_meal['ai_explanation'] = (
-            f"For your goal I set targets of P:{targets['p']}g, C:{targets['c']}g, "
-            f"F:{targets['f']}g across {', '.join(ai_meal_periods)}. {ai_explanation}"
-        )
-        optimized_meal['ai_targets'] = targets
-        optimized_meal['ai_meal_periods'] = ai_meal_periods
-        optimized_meal['ai_dietary_filters'] = ai_dietary_filters
-
-        return jsonify(optimized_meal)
-
-    except Exception as e:
-        app.logger.error(f"Error in /api/suggest_meal: {e}")
-        return jsonify({"error": "An internal error occurred."}), 500
 
 # --- 8. START THE SERVER (local dev only) ---
 # In production, gunicorn imports `app` directly — this block does not run.

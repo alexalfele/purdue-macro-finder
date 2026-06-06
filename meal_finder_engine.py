@@ -5,12 +5,9 @@ import re
 import random
 import math
 import os
-import time
 import logging
 from datetime import datetime, date as date_cls, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from google import genai
-from google.genai import types
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -41,66 +38,14 @@ class MealFinder:
 
         # Per-date menu snapshots: date_str -> {master, by_court, by_meal}
         self.menu_by_date = {}
-        # Per-date AI target cache: date_str -> {goal: result}
-        self.ai_cache_by_date = {}
-        # Track which date AI caches we've already loaded from disk
-        self._ai_dates_loaded_from_disk = set()
 
-        # One lock for all menu data, one for all AI cache. Coarse but adequate.
+        # One lock for all menu data. Coarse but adequate.
         self.data_lock = threading.Lock()
-        self.cache_lock = threading.Lock()
 
         # Per-date load locks so two threads asking for the same date don't both
         # hit the Purdue API. Created on demand.
         self._date_load_locks = {}
         self._load_locks_meta = threading.Lock()
-
-        self.api_key = os.environ.get("GEMINI_API_KEY")
-        if not self.api_key:
-            logger.warning("GEMINI_API_KEY not found. AI suggestions will be disabled.")
-            self.ai_client = None
-        else:
-            self.ai_client = genai.Client(api_key=self.api_key)
-
-    # --- API key management ---
-
-    def is_ai_configured(self):
-        return self.ai_client is not None
-
-    def api_key_masked(self):
-        """Returns last 4 chars of the configured key, or None."""
-        if not self.api_key or len(self.api_key) < 4:
-            return None
-        return self.api_key[-4:]
-
-    def set_api_key(self, key):
-        """Validates the given key with a tiny live call, then swaps in a new client.
-
-        Returns (ok: bool, error_message: Optional[str]). Does NOT persist to disk —
-        the caller decides where to store it.
-        """
-        key = (key or "").strip()
-        if not key:
-            return False, "API key is empty."
-        try:
-            client = genai.Client(api_key=key)
-            client.models.generate_content(
-                model=Config.GEMINI_MODEL,
-                contents="ping",
-                config=types.GenerateContentConfig(max_output_tokens=8),
-            )
-        except Exception as e:
-            logger.warning(f"API key validation failed: {e}")
-            msg = str(e)
-            if "API_KEY_INVALID" in msg or "API key not valid" in msg:
-                return False, "That API key was rejected by Google. Check for typos."
-            if "PERMISSION_DENIED" in msg:
-                return False, "Key was rejected (permission denied). Verify it has Gemini API access."
-            return False, f"Could not validate the key: {msg[:200]}"
-        self.api_key = key
-        self.ai_client = client
-        os.environ["GEMINI_API_KEY"] = key
-        return True, None
 
     # --- date helpers ---
 
@@ -132,9 +77,6 @@ class MealFinder:
 
     def _menu_cache_path(self, date_str):
         return f"{Config.CACHE_PREFIX_MENU}{date_str}.json"
-
-    def _ai_cache_path(self, date_str):
-        return f"{Config.CACHE_PREFIX_AI}{date_str}.json"
 
     # --- numeric / scoring (unchanged from the original implementation) ---
 
@@ -323,190 +265,8 @@ class MealFinder:
         """Public entry point — loads the given date if not already loaded."""
         self._load_menu_for_date(date_str)
 
-    # --- AI cache (per-date) ---
-
-    def _ensure_ai_cache_loaded(self, date_str):
-        """Lazily loads a date's AI target cache from disk, once."""
-        if date_str in self._ai_dates_loaded_from_disk:
-            return
-        path = self._ai_cache_path(date_str)
-        if os.path.exists(path):
-            try:
-                with open(path, "r") as f:
-                    data = json.load(f)
-                with self.cache_lock:
-                    self.ai_cache_by_date[date_str] = data
-                logger.info(f"Loaded {len(data)} cached AI targets for {date_str}")
-            except (json.JSONDecodeError, TypeError, IOError) as e:
-                logger.error(f"Failed to read AI cache {path}: {e}")
-        self._ai_dates_loaded_from_disk.add(date_str)
-
-    def _save_ai_cache(self, date_str):
-        with self.cache_lock:
-            data_to_save = dict(self.ai_cache_by_date.get(date_str, {}))
-        try:
-            with open(self._ai_cache_path(date_str), "w") as f:
-                json.dump(data_to_save, f)
-        except IOError as e:
-            logger.error(f"Error saving AI cache for {date_str}: {e}")
-
-    # --- AI suggestion ---
-
-    _AI_RESPONSE_SCHEMA = {
-        "type": "OBJECT",
-        "required": ["p", "c", "f", "meal_periods", "explanation"],
-        "properties": {
-            "p": {"type": "INTEGER", "description": "Target grams of protein (0-200)."},
-            "c": {"type": "INTEGER", "description": "Target grams of carbohydrates (0-200)."},
-            "f": {"type": "INTEGER", "description": "Target grams of fat (0-100)."},
-            "meal_periods": {
-                "type": "ARRAY",
-                "description": "Which meal periods make sense for this goal.",
-                "items": {
-                    "type": "STRING",
-                    "enum": ["Breakfast", "Brunch", "Lunch", "Late Lunch", "Dinner"],
-                },
-            },
-            "dietary_filters": {
-                "type": "OBJECT",
-                "description": "Dietary filters explicitly implied by the goal. Omit when not implied.",
-                "properties": {
-                    "Vegetarian": {"type": "BOOLEAN"},
-                    "Vegan": {"type": "BOOLEAN"},
-                    "No Gluten": {"type": "BOOLEAN"},
-                },
-            },
-            "explanation": {
-                "type": "STRING",
-                "description": "A 1-2 sentence rationale tied to the menu summary.",
-            },
-        },
-    }
-
-    _AI_SYSTEM_INSTRUCTION = (
-        "You are a sports-nutrition assistant for Purdue University students choosing a "
-        "single meal at a campus dining court. You translate the student's goal into "
-        "concrete macro targets (protein/carbs/fat in grams), pick which meal periods "
-        "fit the goal (Breakfast 7-10am, Brunch ~10am-2pm weekend, Lunch 11am-2pm, "
-        "Late Lunch 2-5pm, Dinner 5-9pm), and infer dietary filters only when the goal "
-        "explicitly implies them. Anchor "
-        "your numbers to what is actually on the menu for the chosen date (a summary is "
-        "provided). Be realistic: a single dining-court meal usually lands in the 20-60g "
-        "protein, 30-90g carb, 10-30g fat range. Keep the explanation concise and grounded."
-    )
-
-    def _build_menu_summary(self, date_str, max_items_per_meal=8):
-        """Compact text summary of the chosen date's menu, for the AI prompt.
-
-        Surfaces top high-protein items per meal period so the model can calibrate
-        targets to what's actually realistic that day instead of inventing numbers.
-        """
-        with self.data_lock:
-            data = self.menu_by_date.get(date_str)
-            items = list(data["master"]) if data else []
-
-        if not items:
-            return "(menu data not yet loaded)"
-
-        by_meal = {}
-        for item in items:
-            by_meal.setdefault(item["meal_name"], []).append(item)
-
-        lines = []
-        for meal in Config.MEAL_PERIODS:
-            meal_items = by_meal.get(meal)
-            if not meal_items:
-                continue
-            top = sorted(meal_items, key=lambda i: i.get("p", 0), reverse=True)[
-                :max_items_per_meal
-            ]
-            sample = ", ".join(
-                f"{i['name']} (P{int(i.get('p', 0))}/C{int(i.get('c', 0))}/F{int(i.get('f', 0))} @ {i['court']})"
-                for i in top
-            )
-            lines.append(f"{meal} ({len(meal_items)} items): {sample}")
-        return "\n".join(lines) if lines else "(no items in menu data)"
-
-    def _get_macros_from_ai_api(self, user_goal, date_str, is_retry=False):
-        """Calls Gemini with structured output. SDK guarantees parseable JSON."""
-        if not self.ai_client:
-            return {"error": "AI service is not configured."}
-
-        menu_summary = self._build_menu_summary(date_str)
-        prompt = (
-            f"Student's goal: \"{user_goal}\"\n"
-            f"Date being planned for: {date_str}\n\n"
-            f"Menu summary for that date (top high-protein items per meal period):\n"
-            f"{menu_summary}\n\n"
-            "Return targets the optimizer can hit with the items above. Choose meal "
-            "periods that fit the goal. Only set a dietary filter when the goal makes "
-            "it explicit (e.g. 'vegan')."
-        )
-
-        try:
-            response = self.ai_client.models.generate_content(
-                model=Config.GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self._AI_SYSTEM_INSTRUCTION,
-                    response_mime_type="application/json",
-                    response_schema=self._AI_RESPONSE_SCHEMA,
-                    temperature=0.4,
-                ),
-            )
-
-            ai_data = json.loads(response.text)
-            targets = {
-                "p": int(ai_data["p"]),
-                "c": int(ai_data["c"]),
-                "f": int(ai_data["f"]),
-            }
-            meal_periods = [
-                m for m in (ai_data.get("meal_periods") or []) if m in Config.MEAL_PERIODS
-            ] or ["Lunch", "Dinner"]
-            raw_filters = ai_data.get("dietary_filters") or {}
-            dietary_filters = {k: bool(v) for k, v in raw_filters.items() if v}
-
-            return {
-                "targets": targets,
-                "meal_periods": meal_periods,
-                "dietary_filters": dietary_filters,
-                "explanation": ai_data.get("explanation", "AI analyzed your goal."),
-            }
-
-        except Exception as e:
-            if "429" in str(e) and not is_retry:
-                logger.warning(f"Rate limit hit for AI goal: '{user_goal}', retrying...")
-                time.sleep(random.randint(Config.RETRY_DELAY_MIN, Config.RETRY_DELAY_MAX))
-                return self._get_macros_from_ai_api(user_goal, date_str, is_retry=True)
-            logger.error(f"Gemini API error for goal '{user_goal}' on {date_str}: {e}")
-            return {"error": "The AI failed to interpret your goal. Try rephrasing."}
-
-    def get_macros_from_ai(self, user_goal, date_str=None):
-        """Public AI entry point: cached per-(date, goal). Loads menu lazily if needed."""
-        date_str = self.normalize_date(date_str)
-        self.ensure_loaded(date_str)
-        self._ensure_ai_cache_loaded(date_str)
-
-        cache_key = user_goal.strip().lower()
-        with self.cache_lock:
-            day_cache = self.ai_cache_by_date.setdefault(date_str, {})
-            if cache_key in day_cache:
-                logger.info(f"AI target cache HIT for ({date_str}, '{user_goal}')")
-                return day_cache[cache_key]
-
-        logger.info(f"AI target cache MISS for ({date_str}, '{user_goal}'). Calling API...")
-        result = self._get_macros_from_ai_api(user_goal, date_str)
-
-        if "error" not in result:
-            with self.cache_lock:
-                self.ai_cache_by_date.setdefault(date_str, {})[cache_key] = result
-            self._save_ai_cache(date_str)
-
-        return result
-
     def start_background_loaders(self):
-        """Preloads today's menu data + AI cache so the first user request is instant."""
+        """Preloads today's menu data so the first user request is instant."""
         today = self._today()
         logger.info("Starting background loaders for today...")
         threading.Thread(
@@ -514,12 +274,6 @@ class MealFinder:
             args=(today,),
             daemon=True,
             name="MenuLoader",
-        ).start()
-        threading.Thread(
-            target=self._ensure_ai_cache_loaded,
-            args=(today,),
-            daemon=True,
-            name="AICacheLoader",
         ).start()
 
     # --- meal-finding algorithm ---

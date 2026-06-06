@@ -107,98 +107,6 @@
             letter-spacing: 0.01em;
         }
 
-        .icon-button {
-            background: transparent;
-            border: 1px solid transparent;
-            color: var(--text-secondary);
-            border-radius: 8px;
-            cursor: pointer;
-            padding: 0.5rem;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.15s ease;
-            line-height: 0;
-        }
-
-        .icon-button:hover {
-            color: var(--purdue-gold);
-            border-color: rgba(207, 185, 145, 0.4);
-            background-color: rgba(207, 185, 145, 0.08);
-        }
-
-        #settings-button {
-            position: absolute;
-            top: 1rem;
-            right: 0;
-        }
-
-        @media (max-width: 600px) {
-            #settings-button {
-                top: 0.5rem;
-            }
-        }
-
-        /* --- MODAL --- */
-        .modal-backdrop {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(4px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            padding: 1rem;
-        }
-
-        .modal-card {
-            background-color: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 10px;
-            padding: 0;
-            width: 100%;
-            max-width: 480px;
-            max-height: 90vh;
-            overflow-y: auto;
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-            animation: modal-in 0.18s ease-out;
-        }
-
-        @keyframes modal-in {
-            from { opacity: 0; transform: translateY(8px) scale(0.98); }
-            to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
-        .modal-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 1rem 1.25rem;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .modal-header h2 {
-            margin: 0;
-            font-size: 1.25rem;
-            color: var(--purdue-gold);
-        }
-
-        .modal-header .icon-button {
-            font-size: 1.5rem;
-            line-height: 1;
-            padding: 0.25rem 0.6rem;
-        }
-
-        .modal-body {
-            padding: 1.25rem;
-        }
-
-        .modal-body h3 {
-            margin: 0 0 0.5rem 0;
-            font-size: 1rem;
-        }
-
         .muted-small {
             color: var(--text-secondary);
             font-size: 0.85rem;
@@ -207,51 +115,6 @@
 
         .muted-small a {
             color: var(--purdue-gold);
-        }
-
-        .footnote {
-            margin-top: 1rem;
-            font-size: 0.75rem;
-        }
-
-        .footnote code {
-            background: var(--bg-tertiary);
-            padding: 0.05rem 0.3rem;
-            border-radius: 3px;
-        }
-
-        .settings-key-status {
-            padding: 0.5rem 0.75rem;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            margin-bottom: 0.75rem;
-        }
-
-        .settings-key-status.configured {
-            border-color: rgba(34, 197, 94, 0.4);
-            color: #86efac;
-        }
-
-        .settings-key-status.unconfigured {
-            border-color: rgba(251, 191, 36, 0.4);
-            color: #fcd34d;
-        }
-
-        .settings-error {
-            color: var(--error);
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            border-radius: 6px;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.85rem;
-            margin: 0.5rem 0 0 0;
-        }
-
-        .modal-actions {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 0.75rem;
         }
 
         .visually-hidden {
@@ -264,49 +127,6 @@
             clip: rect(0, 0, 0, 0);
             white-space: nowrap;
             border: 0;
-        }
-
-        /* --- AI tab banner (key-not-set warning) --- */
-        .ai-banner {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            padding: 0.75rem 0.95rem;
-            margin-bottom: 1rem;
-            background: linear-gradient(135deg, rgba(251, 191, 36, 0.12), rgba(251, 191, 36, 0.04));
-            border: 1px solid rgba(251, 191, 36, 0.3);
-            border-radius: var(--radius);
-            color: var(--text-primary);
-            font-size: 0.88rem;
-        }
-
-        .ai-banner strong {
-            color: #fcd34d;
-        }
-
-        .ai-banner span {
-            color: var(--text-secondary);
-            margin-left: 0.35rem;
-        }
-
-        .banner-button {
-            padding: 0.45rem 0.9rem;
-            background: var(--gradient-gold);
-            color: var(--purdue-dark);
-            border: none;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 0.82rem;
-            font-family: 'Inter', sans-serif;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: transform 0.15s ease, box-shadow 0.15s ease;
-        }
-
-        .banner-button:hover {
-            transform: translateY(-1px);
-            box-shadow: var(--shadow-glow);
         }
 
         /* --- 3. LAYOUT --- */
@@ -839,36 +659,11 @@
             gap: 0.55rem;
         }
 
-        .explanation-card h3::before {
-            content: '✨';
-            font-size: 0.95rem;
-        }
-
         .explanation-card p {
             color: var(--text-primary);
             line-height: 1.55;
             margin: 0;
             font-size: 0.92rem;
-        }
-
-        /* AI-picked tags (filters / meal periods the AI inferred) */
-        .ai-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.35rem;
-            margin-top: 0.85rem;
-        }
-
-        .ai-tag {
-            font-size: 0.72rem;
-            font-weight: 600;
-            padding: 0.22rem 0.6rem;
-            border-radius: 999px;
-            background-color: rgba(207, 185, 145, 0.1);
-            color: var(--purdue-gold);
-            border: 1px solid rgba(207, 185, 145, 0.25);
-            letter-spacing: 0.02em;
-            text-transform: uppercase;
         }
 
         /* --- 10. MEAL ITEMS --- */
@@ -1010,64 +805,13 @@
     <header class="header">
         <h1>Purdue Macro Finder</h1>
         <p class="tagline">Hit your macros with what's actually being served on campus.</p>
-        <button id="settings-button" class="icon-button" aria-label="Open settings" title="Settings">
-            <!-- gear icon, inline svg -->
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-        </button>
     </header>
-
-    <!-- Settings modal -->
-    <div id="settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <div class="modal-card">
-            <div class="modal-header">
-                <h2 id="settings-title">Settings</h2>
-                <button id="settings-close" class="icon-button" aria-label="Close">×</button>
-            </div>
-
-            <div class="modal-body">
-                <h3>Gemini API Key</h3>
-                <p class="muted-small">
-                    Required for the <strong>AI Goal</strong> tab. Get a free one at
-                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com/app/apikey</a>.
-                </p>
-
-                <div id="settings-key-status" class="settings-key-status muted-small">
-                    Checking…
-                </div>
-
-                <label for="settings-key-input" class="visually-hidden">API key</label>
-                <input
-                    type="password"
-                    id="settings-key-input"
-                    placeholder="Paste your Gemini API key (starts with AIza...)"
-                    autocomplete="off"
-                    spellcheck="false">
-
-                <div id="settings-error" class="settings-error hidden"></div>
-
-                <div class="modal-actions">
-                    <button id="settings-save" class="cta-button">Save key</button>
-                </div>
-
-                <p class="muted-small footnote">
-                    The key is stored in <code>.env</code> next to <code>app.py</code> and never echoed back to the browser
-                    (only the last 4 characters are shown).
-                </p>
-            </div>
-        </div>
-    </div>
 
     <div class="app-container">
         <div class="controls-panel">
             
             <div class="tab-buttons" role="tablist" aria-label="Meal finding methods">
-                <button class="tab-button active" data-tab="ai" role="tab" aria-selected="true" aria-controls="ai">
-                    AI Goal
-                </button>
-                <button class="tab-button" data-tab="manual" role="tab" aria-selected="false" aria-controls="manual">
+                <button class="tab-button active" data-tab="manual" role="tab" aria-selected="true" aria-controls="manual">
                     Manual
                 </button>
                 <button class="tab-button" data-tab="featured" role="tab" aria-selected="false" aria-controls="featured">
@@ -1082,24 +826,7 @@
                 <button type="button" id="date-today-button" class="date-today-button" aria-label="Reset to today">Today</button>
             </div>
 
-            <div id="ai" class="tab-content active" role="tabpanel" aria-labelledby="ai-tab">
-                <div id="ai-key-banner" class="ai-banner hidden">
-                    <div>
-                        <strong>AI features are off.</strong>
-                        <span>Add a free Gemini API key to enable goal-based meal planning.</span>
-                    </div>
-                    <button type="button" id="ai-banner-button" class="banner-button">Set up</button>
-                </div>
-                <form id="ai-form">
-                    <div class="card">
-                        <h2 class="form-header">Find a Meal by Goal</h2>
-                        <label for="ai-goal">What's your goal for this meal?</label>
-                        <textarea id="ai-goal" name="ai-goal" placeholder="e.g., 'High protein for muscle gain', 'Low carb meal', 'Pre-workout energy'"></textarea>
-                    </div>
-                </form>
-            </div>
-
-            <div id="manual" class="tab-content" role="tabpanel" aria-labelledby="manual-tab">
+            <div id="manual" class="tab-content active" role="tabpanel" aria-labelledby="manual-tab">
                 <form id="manual-form">
                     
                     <details class="collapsible-card" open>
@@ -1210,10 +937,9 @@
             <div id="results-content" class="hidden">
                 <h2 id="result-header">Your Optimized Meal</h2>
                 
-                <div id="ai-explanation" class="card explanation-card hidden">
-                    <h3>AI Goal Interpretation</h3>
-                    <p id="ai-explanation-text"></p>
-                    <div id="ai-tags" class="ai-tags"></div>
+                <div id="plate-note" class="card explanation-card hidden">
+                    <h3>Notes</h3>
+                    <p id="plate-note-text"></p>
                 </div>
                 
                 <div class="card">
@@ -1250,11 +976,7 @@
             const tabContents = document.querySelectorAll('.tab-content');
             
             // Forms
-            const aiForm = document.getElementById('ai-form');
             const manualForm = document.getElementById('manual-form');
-            
-            // AI Form Inputs (UPDATED)
-            const aiGoal = document.getElementById('ai-goal');
 
             // Shared date picker
             const mealDate = document.getElementById('meal-date');
@@ -1292,13 +1014,13 @@
             
             // Result Content Parts
             const resultHeader = document.getElementById('result-header');
-            const aiExplanation = document.getElementById('ai-explanation');
-            const aiExplanationText = document.getElementById('ai-explanation-text');
+            const plateNote = document.getElementById('plate-note');
+            const plateNoteText = document.getElementById('plate-note-text');
             const chartCanvas = document.getElementById('macro-chart').getContext('2d');
             const mealPlanItems = document.getElementById('meal-plan-items');
             
             // --- 3. GLOBAL STATE VARIABLES ---
-            let activeTab = 'ai';
+            let activeTab = 'manual';
             let macroChart = null;
             let currentRetryTimeout = null;
             let retryCount = 0;
@@ -1362,21 +1084,12 @@
                         statusLabel.textContent = 'Ready to generate';
                         statusLabel.style.color = '#a1a1aa'; // default
                     }
-                } else if (activeTab === 'ai') {
-                    if (aiGoal.value.trim().length < 5) {
-                        statusLabel.textContent = 'Describe your meal goal';
-                        statusLabel.style.color = '#a1a1aa';
-                    } else {
-                        statusLabel.textContent = 'Ready to generate';
-                        statusLabel.style.color = '#a1a1aa';
-                    }
                 }
             }, 500);
-            
+
             targetProtein.addEventListener('input', validateInputs);
             targetCarbs.addEventListener('input', validateInputs);
             targetFat.addEventListener('input', validateInputs);
-            aiGoal.addEventListener('input', validateInputs);
 
             // --- 6. EVENT LISTENERS ---
 
@@ -1398,9 +1111,7 @@
                 }
                 retryCount = 0;
 
-                if (activeTab === 'ai') {
-                    handleAiSuggestion();
-                } else if (activeTab === 'featured') {
+                if (activeTab === 'featured') {
                     handleFeatured();
                 } else {
                     handleManualSearch();
@@ -1409,7 +1120,6 @@
             
             // Reset button
             resetButton.addEventListener('click', () => {
-                aiForm.reset();
                 manualForm.reset();
 
                 // Reset date to today
@@ -1443,34 +1153,6 @@
             });
 
             // --- 7. CORE API FUNCTIONS ---
-
-            async function handleAiSuggestion() {
-                const goal = aiGoal.value.trim();
-                if (goal.length < 5) {
-                    showPlaceholder('Please describe your meal goal in a few words.');
-                    return;
-                }
-                if (!aiConfigured) {
-                    showPlaceholder('Add your Gemini API key in Settings to use AI mode.');
-                    openSettings();
-                    return;
-                }
-
-                const payload = {
-                    goal: goal,
-                    date: mealDate.value || todayLocal(),
-                };
-
-                showLoadingState('Asking AI to set targets...');
-                
-                try {
-                    const result = await makeApiCall('/api/suggest_meal', payload);
-                    displayResult(result, true); // We'll re-use the 'isAiResult' flag
-                    retryCount = 0;
-                } catch (error) {
-                    handleApiError(error);
-                }
-            }
 
             async function handleManualSearch() {
                 // Validate inputs
@@ -1517,7 +1199,7 @@
 
                 try {
                     const result = await makeApiCall('/api/find_meal', payload);
-                    displayResult(result, false);
+                    displayResult(result);
                     retryCount = 0;
                 } catch (error) {
                     handleApiError(error);
@@ -1548,11 +1230,10 @@
                     statusLabel.textContent = data.next_meal_hint || 'Nothing being served right now.';
                     statusLabel.style.color = '#fbbf24';
                     resultHeader.textContent = 'Nothing on the line right now';
-                    aiExplanation.classList.remove('hidden');
-                    aiExplanationText.textContent =
+                    plateNote.classList.remove('hidden');
+                    plateNoteText.textContent =
                         data.next_meal_hint ||
                         'No dining court is currently serving. Check back during a meal period.';
-                    document.getElementById('ai-tags').innerHTML = '';
                     mealPlanItems.innerHTML = '';
                     if (macroChart) { macroChart.destroy(); macroChart = null; }
                     resultsPlaceholder.classList.add('hidden');
@@ -1571,13 +1252,11 @@
                     plan: data.plate.plan,
                     totals: data.plate.totals,
                     date: data.date,
-                    ai_explanation:
-                        `Featured at ${data.plate.court} ${data.plate.meal_name} right now. ` +
-                        `A balanced 3-item plate built from items currently being served.`,
-                    ai_meal_periods: [data.plate.meal_name],
-                    ai_dietary_filters: {},
                 };
-                displayResult(result, true);
+                const note =
+                    `Featured at ${data.plate.court} ${data.plate.meal_name} right now. ` +
+                    `A balanced 3-item plate built from items currently being served.`;
+                displayResult(result, note);
                 resultHeader.textContent = `Featured Plate — ${data.plate.court}`;
                 generateButton.innerHTML = 'Refresh Featured Plate 🍽️';
             }
@@ -1645,26 +1324,14 @@
                     content.classList.toggle('active', content.id === tabName);
                 });
 
-                // Show the AI key banner only on the AI tab when no key is set
-                if (aiKeyBanner) {
-                    if (tabName === 'ai' && !aiConfigured) {
-                        aiKeyBanner.classList.remove('hidden');
-                    } else {
-                        aiKeyBanner.classList.add('hidden');
-                    }
-                }
-
                 // Tailor the Generate button label per tab
                 if (tabName === 'featured') {
                     generateButton.innerHTML = 'Show Featured Plate 🍽️';
-                } else if (tabName === 'ai') {
-                    generateButton.innerHTML = 'Find My Meal 🍽️';
                 } else {
                     generateButton.innerHTML = 'Find My Meal 🍽️';
                 }
 
                 const tabNameText = (
-                    tabName === 'ai' ? 'AI Goal' :
                     tabName === 'featured' ? 'Right Now' : 'Manual'
                 );
                 statusLabel.textContent = `Switched to ${tabNameText} tab.`;
@@ -1731,7 +1398,7 @@
                 statusLabel.style.color = '#ef4444'; // red
             }
 
-            function displayResult(result, isAiResult) {
+            function displayResult(result, noteText) {
                 statusLabel.textContent = `✅ Found a meal at ${result.court}!`;
                 statusLabel.style.color = '#22c55e'; // green
 
@@ -1740,27 +1407,13 @@
                 resultHeader.textContent = dateLabel
                     ? `Your Meal — ${dateLabel}`
                     : 'Your Optimized Meal';
-                
-                // 2. Show/Hide AI Explanation Card
-                if (isAiResult && result.ai_explanation) {
-                    aiExplanationText.textContent = result.ai_explanation;
 
-                    // Render the AI's inferred tags (meal periods + filters) as chips
-                    const tagsContainer = document.getElementById('ai-tags');
-                    tagsContainer.innerHTML = '';
-                    const tags = [];
-                    (result.ai_meal_periods || []).forEach(m => tags.push(m));
-                    Object.keys(result.ai_dietary_filters || {}).forEach(f => tags.push(f));
-                    tags.forEach(label => {
-                        const chip = document.createElement('span');
-                        chip.className = 'ai-tag';
-                        chip.textContent = label;
-                        tagsContainer.appendChild(chip);
-                    });
-
-                    aiExplanation.classList.remove('hidden');
+                // 2. Show/Hide the optional note card (used by the "Right Now" tab)
+                if (noteText) {
+                    plateNoteText.textContent = noteText;
+                    plateNote.classList.remove('hidden');
                 } else {
-                    aiExplanation.classList.add('hidden');
+                    plateNote.classList.add('hidden');
                 }
                 
                 // 3. Update Chart
@@ -1858,149 +1511,10 @@
                 });
             }
 
-            // --- SETTINGS / API KEY ---
-
-            const settingsModal = document.getElementById('settings-modal');
-            const settingsButton = document.getElementById('settings-button');
-            const settingsClose = document.getElementById('settings-close');
-            const settingsKeyStatus = document.getElementById('settings-key-status');
-            const settingsKeyInput = document.getElementById('settings-key-input');
-            const settingsSave = document.getElementById('settings-save');
-            const settingsError = document.getElementById('settings-error');
-            const aiKeyBanner = document.getElementById('ai-key-banner');
-            const aiBannerButton = document.getElementById('ai-banner-button');
-
-            let aiConfigured = false;
-
-            function openSettings() {
-                settingsModal.classList.remove('hidden');
-                settingsError.classList.add('hidden');
-                refreshSettingsStatus();
-                setTimeout(() => settingsKeyInput.focus(), 50);
-            }
-
-            function closeSettings() {
-                settingsModal.classList.add('hidden');
-            }
-
-            settingsButton.addEventListener('click', openSettings);
-            settingsClose.addEventListener('click', closeSettings);
-            aiBannerButton.addEventListener('click', openSettings);
-            settingsModal.addEventListener('click', (e) => {
-                if (e.target === settingsModal) closeSettings();
-            });
-
-            async function refreshSettingsStatus() {
-                try {
-                    const r = await fetch(`${API_BASE_URL}/api/settings`);
-                    const data = await parseJsonResponse(r);
-                    aiConfigured = !!data.ai_configured;
-                    if (data.ai_configured) {
-                        settingsKeyStatus.textContent = `✓ API key configured (ending in …${data.api_key_last4 || '????'}). Paste a new key below to replace it.`;
-                        settingsKeyStatus.classList.remove('unconfigured');
-                        settingsKeyStatus.classList.add('configured');
-                        aiKeyBanner.classList.add('hidden');
-                    } else {
-                        settingsKeyStatus.textContent = '⚠ No API key configured — AI tab is disabled.';
-                        settingsKeyStatus.classList.remove('configured');
-                        settingsKeyStatus.classList.add('unconfigured');
-                        if (activeTab === 'ai') {
-                            aiKeyBanner.classList.remove('hidden');
-                        }
-                    }
-                } catch (e) {
-                    settingsKeyStatus.textContent = e.message;
-                    settingsKeyStatus.classList.remove('configured');
-                    settingsKeyStatus.classList.add('unconfigured');
-                }
-            }
-
-            // Parse a fetch response defensively. If the server returns HTML
-            // (e.g. an error page from a stale or misrouted server), we surface a
-            // helpful message instead of "Unexpected token '<'".
-            async function parseJsonResponse(r) {
-                const text = await r.text();
-                try {
-                    return JSON.parse(text);
-                } catch (_) {
-                    const ct = r.headers.get('content-type') || '';
-                    const looksHtml = text.trim().toLowerCase().startsWith('<');
-                    if (looksHtml || ct.includes('html')) {
-                        throw new Error(
-                            `Server returned HTML instead of JSON (status ${r.status}). ` +
-                            `This usually means an older instance of the app is still running. ` +
-                            `On macOS, port 5000 is also used by AirPlay Receiver — try ` +
-                            `disabling it (System Settings → General → AirDrop & Handoff) ` +
-                            `or restart the app on a different port.`
-                        );
-                    }
-                    throw new Error(`Could not parse response (status ${r.status}).`);
-                }
-            }
-
-            settingsSave.addEventListener('click', async () => {
-                const key = settingsKeyInput.value.trim();
-                settingsError.classList.add('hidden');
-                if (!key) {
-                    settingsError.textContent = 'Please paste your API key.';
-                    settingsError.classList.remove('hidden');
-                    return;
-                }
-                settingsSave.disabled = true;
-                const originalText = settingsSave.textContent;
-                settingsSave.textContent = 'Validating with Google…';
-                try {
-                    const r = await fetch(`${API_BASE_URL}/api/settings/api_key`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ api_key: key }),
-                    });
-                    const data = await parseJsonResponse(r);
-                    if (!r.ok) {
-                        settingsError.textContent = data.error || `Server error (status ${r.status}).`;
-                        settingsError.classList.remove('hidden');
-                        return;
-                    }
-                    settingsKeyInput.value = '';
-                    aiConfigured = true;
-                    aiKeyBanner.classList.add('hidden');
-                    await refreshSettingsStatus();
-                    if (data.note) {
-                        settingsError.textContent = data.note;
-                        settingsError.classList.remove('hidden');
-                    } else {
-                        setTimeout(closeSettings, 600);
-                    }
-                } catch (e) {
-                    settingsError.textContent = e.message;
-                    settingsError.classList.remove('hidden');
-                } finally {
-                    settingsSave.disabled = false;
-                    settingsSave.textContent = originalText;
-                }
-            });
-
-            // Allow Enter key to submit when typing the API key
-            settingsKeyInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    settingsSave.click();
-                }
-            });
-
-            // Esc closes any modal
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && !settingsModal.classList.contains('hidden')) {
-                    e.stopPropagation();
-                    closeSettings();
-                }
-            }, true);
-
             // --- 9. INITIALIZE ---
             setActiveTab(activeTab);
             validateInputs(); // Run once on load
-            refreshSettingsStatus(); // also surfaces the AI-tab banner if needed
-            
+
             // Add accessibility attributes
             generateButton.setAttribute('aria-label', 'Generate meal plan');
             loadingSpinner.setAttribute('role', 'status');

@@ -19,13 +19,9 @@ class Config:
     
     # API settings
     API_TIMEOUT = 10
-    AI_MAX_WORKERS = 4
-    RETRY_DELAY_MIN = 5
-    RETRY_DELAY_MAX = 15
     
     # Cache settings
     CACHE_PREFIX_MENU = "menu_cache_"
-    CACHE_PREFIX_AI = "ai_cache_"
     
     # Validation limits
     MAX_MACRO_TARGET = 500  # grams
@@ -41,13 +37,7 @@ class Config:
     # Purdue API
     PURDUE_API_URL = "https://api.hfs.purdue.edu/menus/v3/GraphQL"
     
-    # AI Model
-    GEMINI_MODEL = "gemini-2.0-flash-exp"
-    
     # Rate limiting
     RATE_LIMIT_PER_DAY = 200
     RATE_LIMIT_PER_HOUR = 50
     RATE_LIMIT_PER_MINUTE = 20
-
-    AI_PRELOAD_ENABLED = True  # Allow preloading when possible
-    AI_PRELOAD_ON_STARTUP = False  # Don't preload on startup (on-demand)
