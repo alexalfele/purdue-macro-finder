@@ -12,791 +12,376 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        /* --- 1. CSS VARIABLES & RESET --- */
+        /* ===== Purdue Macro Finder — light, Purdue-branded theme ===== */
         :root {
             /* Brand */
-            --purdue-gold: #CFB991;
-            --purdue-gold-bright: #E5CFA1;
-            --purdue-gold-deep: #A68A56;
-            --purdue-dark: #231F20;
+            --gold: #CFB991;          /* Boilermaker (aged) gold */
+            --gold-bright: #DAAA00;   /* Rush gold (accent) */
+            --gold-soft: #efe7d3;     /* light gold tint */
+            --gold-deep: #8a7444;
+            --black: #0b0b0c;
+            --coal: #1c1c1c;
 
-            /* Surfaces — slightly cooler dark for more depth */
-            --bg-primary: #0e0e12;
-            --bg-secondary: #18181f;
-            --bg-tertiary: #22222b;
-            --bg-elevated: #2a2a35;
-            --border-color: #353541;
-            --border-subtle: rgba(255, 255, 255, 0.06);
+            /* Surfaces */
+            --bg: #f3f2ee;
+            --surface: #ffffff;
+            --surface-2: #faf9f5;
+            --border: #e6e2d8;
+            --border-strong: #d8d3c6;
 
             /* Text */
-            --text-primary: #f4f4f5;
-            --text-secondary: #a1a1aa;
-            --text-muted: #71717a;
+            --text: #1c1c1c;
+            --text-secondary: #555960;  /* Steel */
+            --text-muted: #83868f;      /* Cool gray */
 
-            /* Macro accents (used for item cards, totals, chart) */
-            --macro-protein: #6ee7b7;
-            --macro-carb: #7dd3fc;
-            --macro-fat: #fde047;
+            /* Macros */
+            --macro-protein: #2e7d52;
+            --macro-carb: #2f6fb0;
+            --macro-fat: #c39a3b;
 
             /* Effects */
-            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-            --shadow-glow: 0 0 24px rgba(207, 185, 145, 0.18);
-            --gradient-gold: linear-gradient(135deg, var(--purdue-gold-bright), var(--purdue-gold) 50%, var(--purdue-gold-deep));
-            --gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0));
+            --shadow-sm: 0 1px 2px rgba(28, 28, 28, 0.05);
+            --shadow-md: 0 6px 20px rgba(28, 28, 28, 0.08);
             --radius: 10px;
             --radius-lg: 14px;
+            --ring: 0 0 0 3px rgba(207, 185, 145, 0.45);
         }
 
-        * {
-            box-sizing: border-box;
-        }
-
-        html, body {
-            min-height: 100%;
-        }
+        * { box-sizing: border-box; }
+        html, body { min-height: 100%; }
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-primary);
-            background-image:
-                radial-gradient(ellipse 80% 50% at 50% -10%, rgba(207, 185, 145, 0.12), transparent 60%),
-                radial-gradient(ellipse 50% 40% at 90% 110%, rgba(207, 185, 145, 0.05), transparent 60%);
-            background-attachment: fixed;
-            color: var(--text-primary);
+            background: var(--bg);
+            color: var(--text);
             margin: 0;
-            padding: 1.5rem;
             line-height: 1.6;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
         }
 
-        /* --- 2. HEADER --- */
-        .header {
-            position: relative;
-            text-align: center;
-            margin-bottom: 2.5rem;
-            padding-top: 1rem;
+        /* ===== Top brand bar ===== */
+        .site-header {
+            background: var(--black);
+            border-bottom: 3px solid var(--gold);
         }
 
-        .header h1 {
-            font-family: 'Manrope', 'Inter', sans-serif;
-            font-size: clamp(2rem, 4vw, 2.75rem);
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            background: var(--gradient-gold);
-            background-clip: text;
-            -webkit-background-clip: text;
-            color: transparent;
-            margin: 0;
-            line-height: 1.1;
-        }
-
-        .header p.tagline {
-            margin: 0.4rem 0 0 0;
-            color: var(--text-secondary);
-            font-size: 0.95rem;
-            font-weight: 400;
-            letter-spacing: 0.01em;
-        }
-
-        .muted-small {
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-            margin: 0 0 0.75rem 0;
-        }
-
-        .muted-small a {
-            color: var(--purdue-gold);
-        }
-
-        /* --- 3. LAYOUT --- */
-        .app-container {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 1.5rem;
+        .site-header__inner {
             max-width: 1200px;
-            margin: auto;
+            margin: 0 auto;
+            padding: 0.9rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
         }
 
+        .brand { display: inline-flex; align-items: center; gap: 0.7rem; text-decoration: none; }
+
+        .brand__logo {
+            width: 34px; height: 34px; flex: none;
+            display: grid; place-items: center;
+            background: var(--gold); color: var(--black);
+            font-family: 'Manrope', 'Inter', sans-serif; font-weight: 800; font-size: 1.15rem;
+            border-radius: 8px;
+        }
+
+        .brand__text {
+            font-family: 'Manrope', 'Inter', sans-serif;
+            font-size: 1.15rem; font-weight: 600; letter-spacing: -0.01em;
+            color: #fff;
+        }
+        .brand__text strong { color: var(--gold); font-weight: 800; }
+
+        .brand__tag {
+            color: #b9bbc0; font-size: 0.78rem; font-weight: 500;
+            text-transform: uppercase; letter-spacing: 0.08em;
+        }
+
+        /* ===== Page ===== */
+        .page { max-width: 1200px; margin: 0 auto; padding: 1.75rem 1.5rem 3rem; }
+        .page-intro { margin: 0 0 1.5rem; color: var(--text-secondary); font-size: 1rem; }
+
+        .muted-small { color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 0.75rem; }
+        .muted-small a { color: var(--gold-deep); font-weight: 600; }
+
+        /* ===== Layout ===== */
+        .app-container { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
         @media (min-width: 1024px) {
-            .app-container {
-                grid-template-columns: 38% 1fr;
-                gap: 1.75rem;
-            }
-        }
-
-        @media (min-width: 1400px) {
-            .app-container {
-                max-width: 1280px;
-            }
+            .app-container { grid-template-columns: 38% 1fr; gap: 1.75rem; align-items: start; }
         }
 
         .controls-panel, .results-panel {
-            background-color: var(--bg-secondary);
-            background-image: var(--gradient-card);
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            border: 1px solid var(--border-subtle);
-            padding: 1.75rem;
-            box-shadow: var(--shadow-md);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-sm);
             display: flex;
             flex-direction: column;
-            position: relative;
         }
+        .results-panel { min-height: 480px; }
 
-        /* Subtle top-edge highlight on panels */
-        .controls-panel::before, .results-panel::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 1.5rem; right: 1.5rem;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(207, 185, 145, 0.3), transparent);
-            pointer-events: none;
-        }
-
-        .results-panel {
-            min-height: 500px;
-        }
-
-        /* --- 4. TABS --- */
+        /* ===== Tabs ===== */
         .tab-buttons {
-            display: flex;
-            gap: 0.25rem;
-            padding: 0.3rem;
-            background: var(--bg-tertiary);
+            display: flex; gap: 0.25rem; padding: 0.28rem;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
             border-radius: var(--radius);
-            margin-bottom: 1.5rem;
-            font-family: 'Inter', sans-serif;
+            margin-bottom: 1.4rem;
         }
-
         .tab-button {
-            flex: 1;
-            background-color: transparent;
-            border: none;
+            flex: 1; background: transparent; border: none;
             color: var(--text-secondary);
-            padding: 0.65rem 0.75rem;
-            cursor: pointer;
-            font-size: 0.9rem;
-            font-weight: 600;
-            border-radius: 7px;
-            transition: all 0.18s ease;
-            font-family: inherit;
+            padding: 0.6rem 0.75rem; cursor: pointer;
+            font-size: 0.9rem; font-weight: 600; font-family: inherit;
+            border-radius: 7px; transition: all 0.15s ease;
         }
-
-        .tab-button:hover {
-            color: var(--text-primary);
-            background-color: rgba(255, 255, 255, 0.04);
-        }
-
+        .tab-button:hover { color: var(--coal); background: rgba(0, 0, 0, 0.04); }
         .tab-button.active {
-            background-color: var(--bg-elevated);
-            color: var(--purdue-gold);
-            box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            background: var(--gold); color: var(--black);
+            box-shadow: var(--shadow-sm);
         }
+        .tab-button:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 2px; }
 
-        .tab-button:focus-visible {
-            outline: 2px solid var(--purdue-gold);
-            outline-offset: 2px;
-        }
+        .tab-content { display: none; animation: fade-in 0.22s ease-out; }
+        .tab-content.active { display: block; }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-        .tab-content {
-            display: none;
-            animation: fade-in 0.25s ease-out;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        @keyframes fade-in {
-            from { opacity: 0; transform: translateY(4px); }
-            to   { opacity: 1; transform: translateY(0); }
-        }
-
-        /* --- DATE PICKER (shared across tabs) --- */
+        /* ===== Date picker ===== */
         .date-picker-row {
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            background-color: var(--bg-tertiary);
-            background-image: var(--gradient-card);
-            border: 1px solid var(--border-color);
+            display: flex; align-items: center; gap: 0.6rem;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
             border-radius: var(--radius);
-            padding: 0.55rem 0.75rem 0.55rem 1rem;
+            padding: 0.5rem 0.6rem 0.5rem 0.9rem;
             margin-bottom: 1.25rem;
-            transition: border-color 0.15s ease;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
-
-        .date-picker-row:focus-within {
-            border-color: rgba(207, 185, 145, 0.5);
-        }
-
+        .date-picker-row:focus-within { border-color: var(--gold); box-shadow: var(--ring); }
         .date-picker-row label {
-            margin: 0;
-            font-size: 0.78rem;
-            font-weight: 600;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            white-space: nowrap;
+            margin: 0; font-size: 0.72rem; font-weight: 700; color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
         }
-
-        .date-picker-row input[type="date"] {
-            flex: 1;
-            width: auto;
-            padding: 0.45rem 0.65rem;
-            font-size: 0.92rem;
-            color-scheme: dark;
-        }
+        .date-picker-row input[type="date"] { flex: 1; width: auto; padding: 0.4rem 0.6rem; font-size: 0.92rem; color-scheme: light; }
 
         .date-today-button {
             padding: 0.45rem 0.85rem;
-            background-color: rgba(207, 185, 145, 0.1);
-            color: var(--purdue-gold);
-            border: 1px solid rgba(207, 185, 145, 0.4);
-            border-radius: 8px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            font-family: 'Inter', sans-serif;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            white-space: nowrap;
+            background: var(--gold-soft); color: var(--gold-deep);
+            border: 1px solid var(--gold); border-radius: 8px;
+            font-size: 0.8rem; font-weight: 700; font-family: inherit; cursor: pointer;
+            white-space: nowrap; transition: all 0.15s ease;
         }
+        .date-today-button:hover { background: var(--gold); color: var(--black); }
 
-        .date-today-button:hover {
-            background-color: rgba(207, 185, 145, 0.2);
-            border-color: var(--purdue-gold);
-        }
+        .meal-time { color: var(--text-muted); font-size: 0.78rem; font-weight: 400; margin-left: 0.4rem; font-variant-numeric: tabular-nums; }
 
-        .meal-time {
-            color: var(--text-muted);
-            font-size: 0.78rem;
-            font-weight: 400;
-            margin-left: 0.4rem;
-            font-variant-numeric: tabular-nums;
-        }
-
-        /* --- 5. COLLAPSIBLE CARDS --- */
+        /* ===== Collapsible cards ===== */
         .collapsible-card {
-            background-color: var(--bg-tertiary);
-            background-image: var(--gradient-card);
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: var(--radius);
-            margin-bottom: 0.85rem;
-            border: 1px solid var(--border-color);
-            transition: border-color 0.18s ease, transform 0.18s ease;
-            overflow: hidden;
+            margin-bottom: 0.85rem; overflow: hidden;
+            transition: border-color 0.15s ease;
         }
-
-        .collapsible-card:hover {
-            border-color: rgba(207, 185, 145, 0.35);
-        }
-
+        .collapsible-card:hover { border-color: var(--border-strong); }
         .collapsible-card summary {
-            font-size: 1rem;
-            font-weight: 600;
-            padding: 0.9rem 1rem;
-            cursor: pointer;
-            list-style: none;
-            user-select: none;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            color: var(--text-primary);
+            font-size: 0.95rem; font-weight: 700; padding: 0.85rem 1rem; cursor: pointer;
+            list-style: none; user-select: none; display: flex; align-items: center; gap: 0.5rem; color: var(--coal);
         }
-
-        .collapsible-card summary::-webkit-details-marker {
-            display: none;
-        }
-
+        .collapsible-card summary::-webkit-details-marker { display: none; }
         .collapsible-card summary::before {
-            content: '';
-            width: 6px; height: 6px;
-            border-right: 2px solid var(--purdue-gold);
-            border-bottom: 2px solid var(--purdue-gold);
-            transform: rotate(-45deg);
-            transition: transform 0.2s ease;
-            margin-left: 2px;
-            margin-right: 4px;
+            content: ''; width: 6px; height: 6px;
+            border-right: 2px solid var(--gold-deep); border-bottom: 2px solid var(--gold-deep);
+            transform: rotate(-45deg); transition: transform 0.2s ease; margin-right: 4px;
         }
+        .collapsible-card[open] summary::before { transform: rotate(45deg); }
+        .collapsible-card[open] summary { border-bottom: 1px solid var(--border); }
+        .collapsible-card > div { padding: 1rem; }
 
-        .collapsible-card[open] summary::before {
-            transform: rotate(45deg);
-        }
-
-        .collapsible-card[open] summary {
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .collapsible-card > div {
-            padding: 1rem;
-        }
-
-        /* --- 6. FORMS & INPUTS --- */
+        /* ===== Cards / forms ===== */
         .card {
-            background-color: var(--bg-tertiary);
-            background-image: var(--gradient-card);
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: var(--radius);
-            padding: 1.25rem 1.4rem;
-            margin-bottom: 1.25rem;
-            border: 1px solid var(--border-color);
+            padding: 1.2rem 1.35rem; margin-bottom: 1.2rem;
         }
-
         .card h2, .card h3 {
             font-family: 'Manrope', 'Inter', sans-serif;
-            font-size: 1.1rem;
-            font-weight: 700;
-            letter-spacing: -0.01em;
-            margin-top: 0;
-            margin-bottom: 0.85rem;
-            padding-bottom: 0.7rem;
-            border-bottom: 1px solid var(--border-subtle);
-            color: var(--text-primary);
+            font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em;
+            margin: 0 0 0.85rem; padding-bottom: 0.65rem;
+            border-bottom: 1px solid var(--border); color: var(--coal);
         }
 
         label {
-            display: block;
-            font-size: 0.8rem;
-            font-weight: 500;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            margin-bottom: 0.45rem;
+            display: block; font-size: 0.72rem; font-weight: 700; color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem;
         }
 
-        input[type="number"],
-        input[type="date"],
-        input[type="password"],
-        input[type="text"],
-        select,
-        textarea {
-            width: 100%;
-            padding: 0.7rem 0.85rem;
-            background-color: var(--bg-elevated);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 0.95rem;
-            transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-            font-family: inherit;
+        input[type="number"], input[type="date"], input[type="password"], input[type="text"], select, textarea {
+            width: 100%; padding: 0.65rem 0.8rem;
+            background: var(--surface); color: var(--text);
+            border: 1px solid var(--border-strong); border-radius: 8px;
+            font-size: 0.95rem; font-family: inherit;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
+        input[type="number"]:focus, input[type="date"]:focus, input[type="password"]:focus,
+        input[type="text"]:focus, select:focus, textarea:focus {
+            outline: none; border-color: var(--gold); box-shadow: var(--ring);
+        }
+        input[type="number"]:hover, input[type="date"]:hover, input[type="password"]:hover,
+        input[type="text"]:hover, select:hover, textarea:hover { border-color: var(--gold); }
+        textarea { resize: vertical; min-height: 88px; line-height: 1.5; }
 
-        input[type="number"]:focus,
-        input[type="date"]:focus,
-        input[type="password"]:focus,
-        input[type="text"]:focus,
-        select:focus,
-        textarea:focus {
-            outline: none;
-            border-color: var(--purdue-gold);
-            box-shadow: 0 0 0 3px rgba(207, 185, 145, 0.18);
-            background-color: var(--bg-tertiary);
-        }
-
-        input[type="number"]:hover,
-        input[type="date"]:hover,
-        input[type="password"]:hover,
-        input[type="text"]:hover,
-        select:hover,
-        textarea:hover {
-            border-color: rgba(207, 185, 145, 0.45);
-        }
-
-        textarea {
-            resize: vertical;
-            min-height: 88px;
-            line-height: 1.5;
-        }
-
-        .macro-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 0.85rem;
-        }
+        .macro-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.85rem; }
 
         .filters label {
-            display: flex;
-            align-items: center;
-            gap: 0.55rem;
-            color: var(--text-primary);
-            padding: 0.4rem 0;
-            margin: 0;
-            cursor: pointer;
-            font-size: 0.92rem;
-            text-transform: none;
-            letter-spacing: 0;
-            font-weight: 500;
-            transition: color 0.15s ease;
+            display: flex; align-items: center; gap: 0.55rem; color: var(--coal);
+            padding: 0.35rem 0; margin: 0; cursor: pointer; font-size: 0.92rem;
+            text-transform: none; letter-spacing: 0; font-weight: 500; transition: color 0.15s ease;
         }
-
-        .filters label:hover {
-            color: var(--purdue-gold);
-        }
-
-        input[type="checkbox"] {
-            width: 1.05em;
-            height: 1.05em;
-            background-color: var(--bg-elevated);
-            border: 1.5px solid var(--border-color);
-            border-radius: 4px;
-            accent-color: var(--purdue-gold);
-            cursor: pointer;
-            transition: border-color 0.15s ease;
-        }
-
-        input[type="checkbox"]:hover {
-            border-color: var(--purdue-gold);
-        }
+        .filters label:hover { color: var(--gold-deep); }
+        input[type="checkbox"] { width: 1.05em; height: 1.05em; accent-color: var(--gold-deep); cursor: pointer; }
 
         .form-header {
-            font-family: 'Manrope', 'Inter', sans-serif;
-            font-size: 1.05rem !important;
-            font-weight: 700;
-            letter-spacing: -0.01em;
-            color: var(--text-primary);
+            font-family: 'Manrope', 'Inter', sans-serif; font-size: 1.05rem !important;
+            font-weight: 700; letter-spacing: -0.01em; color: var(--coal);
         }
 
-        /* --- 7. BUTTONS --- */
-        .cta-footer {
-            margin-top: auto;
-            padding-top: 1.25rem;
-            border-top: 1px solid var(--border-subtle);
-        }
-
+        /* ===== Buttons ===== */
+        .cta-footer { margin-top: auto; padding-top: 1.25rem; border-top: 1px solid var(--border); }
         .cta-button {
-            width: 100%;
-            padding: 0.95rem;
-            background: var(--gradient-gold);
-            color: var(--purdue-dark);
-            border: none;
-            border-radius: 10px;
-            font-size: 1rem;
-            font-weight: 700;
-            font-family: 'Inter', sans-serif;
-            letter-spacing: 0.01em;
-            cursor: pointer;
-            transition: all 0.18s ease;
-            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset, var(--shadow-sm);
-            position: relative;
+            width: 100%; padding: 0.9rem;
+            background: var(--gold); color: var(--black);
+            border: none; border-radius: 10px;
+            font-size: 1rem; font-weight: 800; font-family: inherit; letter-spacing: 0.01em;
+            cursor: pointer; transition: all 0.15s ease; box-shadow: var(--shadow-sm);
         }
-
-        .cta-button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, var(--shadow-md), var(--shadow-glow);
-        }
-
-        .cta-button:active {
-            transform: translateY(0);
-        }
-
-        .cta-button:disabled {
-            background: #3a3a44;
-            color: #666;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .cta-button:focus-visible {
-            outline: 2px solid var(--purdue-gold);
-            outline-offset: 3px;
-        }
+        .cta-button:hover { background: var(--gold-bright); box-shadow: var(--shadow-md); }
+        .cta-button:active { transform: translateY(1px); }
+        .cta-button:disabled { background: #e6e3db; color: #a7a39a; cursor: not-allowed; box-shadow: none; }
+        .cta-button:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
 
         #reset-button {
-            width: 100%;
-            padding: 0.65rem;
-            background-color: transparent;
-            color: var(--text-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 0.9rem;
-            font-family: 'Inter', sans-serif;
-            font-weight: 500;
-            cursor: pointer;
-            margin-top: 0.6rem;
+            width: 100%; padding: 0.6rem; background: transparent; color: var(--text-secondary);
+            border: 1px solid var(--border-strong); border-radius: 8px;
+            font-size: 0.9rem; font-family: inherit; font-weight: 600; cursor: pointer; margin-top: 0.6rem;
             transition: all 0.15s ease;
         }
-
-        #reset-button:hover {
-            background-color: var(--bg-tertiary);
-            color: var(--text-primary);
-            border-color: rgba(207, 185, 145, 0.4);
-        }
+        #reset-button:hover { background: var(--surface-2); color: var(--coal); border-color: var(--gold); }
 
         #status-label {
-            font-size: 0.825rem;
-            color: var(--text-secondary);
-            text-align: center;
-            margin: 0.85rem 0 0 0;
-            min-height: 1.25em;
-            transition: color 0.2s ease;
+            font-size: 0.825rem; color: var(--text-secondary); text-align: center;
+            margin: 0.85rem 0 0; min-height: 1.25em; transition: color 0.2s ease;
         }
 
-        /* --- 8. LOADING STATES --- */
-        .hidden {
-            display: none !important;
-        }
+        /* ===== Loading / placeholder ===== */
+        .hidden { display: none !important; }
 
-        #results-placeholder {
-            text-align: center;
-            color: var(--text-secondary);
-            padding: 4rem 1.5rem;
-            margin: auto;
-        }
-
+        #results-placeholder { text-align: center; color: var(--text-secondary); padding: 3.5rem 1.5rem; margin: auto; }
         #results-placeholder .placeholder-icon {
-            width: 72px;
-            height: 72px;
-            margin: 0 auto 1.5rem;
-            border-radius: 50%;
-            background: linear-gradient(135deg, rgba(207, 185, 145, 0.15), rgba(207, 185, 145, 0.04));
-            border: 1px solid rgba(207, 185, 145, 0.25);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--purdue-gold);
-            font-size: 2rem;
+            width: 68px; height: 68px; margin: 0 auto 1.25rem; border-radius: 50%;
+            background: var(--gold-soft); border: 1px solid var(--gold);
+            display: flex; align-items: center; justify-content: center; color: var(--gold-deep); font-size: 2rem;
         }
-
         #results-placeholder h3 {
-            font-family: 'Manrope', 'Inter', sans-serif;
-            font-size: 1.35rem;
-            font-weight: 700;
-            letter-spacing: -0.01em;
-            color: var(--text-primary);
-            margin: 0 0 0.4rem 0;
+            font-family: 'Manrope', 'Inter', sans-serif; font-size: 1.3rem; font-weight: 700;
+            letter-spacing: -0.01em; color: var(--coal); margin: 0 0 0.4rem;
         }
+        #results-placeholder p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
 
-        #results-placeholder p {
-            margin: 0;
-            color: var(--text-muted);
-            font-size: 0.9rem;
-        }
-
-        #loading-spinner {
-            text-align: center;
-            padding: 4rem 0;
-            color: var(--text-secondary);
-            margin: auto;
-        }
-
-        #loading-spinner p {
-            margin-top: 1rem;
-            font-size: 0.9rem;
-        }
-
+        #loading-spinner { text-align: center; padding: 3.5rem 0; color: var(--text-secondary); margin: auto; }
+        #loading-spinner p { margin-top: 1rem; font-size: 0.9rem; }
         .spinner {
-            width: 44px;
-            height: 44px;
-            border: 3px solid var(--border-color);
-            border-top-color: var(--purdue-gold);
-            border-right-color: var(--purdue-gold-bright);
-            border-radius: 50%;
-            display: inline-block;
-            box-sizing: border-box;
+            width: 44px; height: 44px; border: 3px solid var(--border-strong);
+            border-top-color: var(--gold); border-right-color: var(--gold-bright);
+            border-radius: 50%; display: inline-block; box-sizing: border-box;
             animation: rotation 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
         }
-
         .spinner-inline {
-            width: 14px;
-            height: 14px;
-            border: 2px solid rgba(35, 31, 32, 0.3);
-            border-top-color: var(--purdue-dark);
-            border-radius: 50%;
-            display: inline-block;
-            box-sizing: border-box;
-            animation: rotation 0.8s linear infinite;
-            margin-right: 0.5rem;
-            vertical-align: -2px;
+            width: 14px; height: 14px; border: 2px solid rgba(0, 0, 0, 0.25); border-top-color: var(--black);
+            border-radius: 50%; display: inline-block; box-sizing: border-box;
+            animation: rotation 0.8s linear infinite; margin-right: 0.5rem; vertical-align: -2px;
         }
+        @keyframes rotation { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
 
-        @keyframes rotation {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* --- 9. RESULTS PANEL --- */
+        /* ===== Results ===== */
         #result-header {
-            font-family: 'Manrope', 'Inter', sans-serif;
-            font-size: 1.65rem;
-            font-weight: 800;
-            letter-spacing: -0.02em;
-            color: var(--purdue-gold);
-            margin: 0 0 1.25rem 0;
-            line-height: 1.15;
+            font-family: 'Manrope', 'Inter', sans-serif; font-size: 1.5rem; font-weight: 800;
+            letter-spacing: -0.02em; color: var(--coal); margin: 0 0 1.2rem; line-height: 1.15;
         }
 
-        .explanation-card {
-            background:
-                radial-gradient(circle at top right, rgba(207, 185, 145, 0.18), transparent 60%),
-                linear-gradient(135deg, rgba(207, 185, 145, 0.08), rgba(207, 185, 145, 0.02));
-            border: 1px solid rgba(207, 185, 145, 0.35);
-        }
+        .explanation-card { background: var(--gold-soft); border: 1px solid var(--gold); }
+        .explanation-card h3 { color: var(--gold-deep); border-bottom-color: rgba(138, 116, 68, 0.25); }
+        .explanation-card p { color: var(--coal); line-height: 1.55; margin: 0; font-size: 0.92rem; }
 
-        .explanation-card h3 {
-            color: var(--purdue-gold);
-            border-bottom-color: rgba(207, 185, 145, 0.2);
-            display: flex;
-            align-items: center;
-            gap: 0.55rem;
-        }
-
-        .explanation-card p {
-            color: var(--text-primary);
-            line-height: 1.55;
-            margin: 0;
-            font-size: 0.92rem;
-        }
-
-        /* --- 10. MEAL ITEMS --- */
+        /* ===== Meal items (list rows, like the dining menu) ===== */
+        #meal-plan-items { border-top: 1px solid var(--border); }
         .item-card {
-            display: grid;
-            grid-template-columns: 1fr auto;
-            gap: 1rem;
-            align-items: center;
-            background: linear-gradient(180deg, var(--bg-elevated), var(--bg-tertiary));
-            padding: 0.95rem 1.1rem;
-            border-radius: 10px;
-            margin-bottom: 0.6rem;
-            border: 1px solid var(--border-color);
-            transition: all 0.18s ease;
-            position: relative;
-            overflow: hidden;
+            display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: center;
+            background: var(--surface); padding: 0.85rem 0.4rem 0.85rem 0.75rem;
+            border-bottom: 1px solid var(--border); position: relative; transition: background 0.15s ease;
         }
-
         .item-card::before {
-            content: '';
-            position: absolute;
-            left: 0; top: 0; bottom: 0;
-            width: 3px;
-            background: var(--gradient-gold);
-            opacity: 0;
-            transition: opacity 0.18s ease;
+            content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+            background: var(--gold); opacity: 0; transition: opacity 0.15s ease;
         }
-
-        .item-card:hover {
-            border-color: rgba(207, 185, 145, 0.4);
-            transform: translateX(3px);
-            box-shadow: var(--shadow-md);
-        }
-
-        .item-card:hover::before {
-            opacity: 1;
-        }
-
-        .item-info h4 {
-            font-size: 0.98rem;
-            font-weight: 600;
-            margin: 0 0 0.2rem 0;
-            color: var(--text-primary);
-            letter-spacing: -0.01em;
-        }
-
-        .item-info p {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            margin: 0;
-        }
-
-        .item-macros {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-            font-size: 0.78rem;
-            font-weight: 600;
-            font-variant-numeric: tabular-nums;
-        }
-
+        .item-card:hover { background: var(--surface-2); }
+        .item-card:hover::before { opacity: 1; }
+        .item-info h4 { font-size: 0.98rem; font-weight: 700; margin: 0 0 0.15rem; color: var(--coal); letter-spacing: -0.01em; }
+        .item-info p { font-size: 0.8rem; color: var(--text-muted); margin: 0; }
+        .item-macros { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.76rem; font-weight: 700; font-variant-numeric: tabular-nums; }
         .item-macros span {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 56px;
-            padding: 0.18rem 0.55rem;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.06);
+            display: inline-flex; align-items: center; justify-content: center; min-width: 54px;
+            padding: 0.16rem 0.5rem; border-radius: 6px; border: 1px solid transparent;
         }
+        .item-macros .p { color: var(--macro-protein); background: rgba(46, 125, 82, 0.10); border-color: rgba(46, 125, 82, 0.22); }
+        .item-macros .c { color: var(--macro-carb); background: rgba(47, 111, 176, 0.10); border-color: rgba(47, 111, 176, 0.22); }
+        .item-macros .f { color: #9a7a1f; background: rgba(195, 154, 59, 0.14); border-color: rgba(195, 154, 59, 0.30); }
 
-        .item-macros .p {
-            color: var(--macro-protein);
-            background: rgba(110, 231, 183, 0.08);
-            border-color: rgba(110, 231, 183, 0.2);
-        }
+        /* ===== Chart ===== */
+        .chart-container { position: relative; max-width: 280px; margin: 0.5rem auto; }
 
-        .item-macros .c {
-            color: var(--macro-carb);
-            background: rgba(125, 211, 252, 0.08);
-            border-color: rgba(125, 211, 252, 0.2);
-        }
-
-        .item-macros .f {
-            color: var(--macro-fat);
-            background: rgba(253, 224, 71, 0.08);
-            border-color: rgba(253, 224, 71, 0.2);
-        }
-
-        /* --- 11. CHART --- */
-        .chart-container {
-            position: relative;
-            max-width: 280px;
-            margin: 0.5rem auto;
-        }
-
-        /* --- 12. RESPONSIVE --- */
+        /* ===== Responsive ===== */
         @media (max-width: 768px) {
-            body {
-                padding: 1rem;
-            }
-
-            .header h1 {
-                font-size: 1.75rem;
-            }
-
-            .macro-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .item-card {
-                grid-template-columns: 1fr;
-            }
-
-            .item-macros {
-                text-align: left;
-                flex-direction: row;
-                gap: 1rem;
-            }
+            .page { padding: 1.25rem 1rem 2.5rem; }
+            .site-header__inner { padding: 0.8rem 1rem; }
+            .brand__tag { display: none; }
+            .macro-grid { grid-template-columns: 1fr; }
+            .item-card { grid-template-columns: 1fr; }
+            .item-macros { flex-direction: row; gap: 0.5rem; }
         }
 
-        /* --- 13. ACCESSIBILITY --- */
+        /* ===== Accessibility ===== */
         @media (prefers-reduced-motion: reduce) {
-            * {
-                animation-duration: 0.01ms !important;
-                animation-iteration-count: 1 !important;
-                transition-duration: 0.01ms !important;
-            }
+            * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
         }
-
-        *:focus-visible {
-            outline: 2px solid var(--purdue-gold);
-            outline-offset: 2px;
-        }
+        *:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 2px; }
     </style>
 </head>
 <body>
-    <header class="header">
-        <h1>Purdue Macro Finder</h1>
-        <p class="tagline">Hit your macros with what's actually being served on campus.</p>
+    <header class="site-header">
+        <div class="site-header__inner">
+            <span class="brand">
+                <span class="brand__logo" aria-hidden="true">P</span>
+                <span class="brand__text">Purdue <strong>Macro Finder</strong></span>
+            </span>
+            <span class="brand__tag">Dining macro planner</span>
+        </div>
     </header>
 
-    <div class="app-container">
+    <main class="page">
+        <p class="page-intro">Hit your macros with what's actually being served on campus.</p>
+
+        <div class="app-container">
         <div class="controls-panel">
             
             <div class="tab-buttons" role="tablist" aria-label="Meal finding methods">
-                <button class="tab-button active" data-tab="manual" role="tab" aria-selected="true" aria-controls="manual">
+                <button class="tab-button active" id="manual-tab" data-tab="manual" role="tab" aria-selected="true" aria-controls="manual">
                     Manual
                 </button>
-                <button class="tab-button" data-tab="featured" role="tab" aria-selected="false" aria-controls="featured">
+                <button class="tab-button" id="featured-tab" data-tab="featured" role="tab" aria-selected="false" aria-controls="featured">
                     Right Now
                 </button>
             </div>
@@ -939,6 +524,7 @@
             </div>
         </div>
     </div>
+    </main>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
@@ -1058,13 +644,13 @@
                     
                     if (protein > 100) {
                         statusLabel.textContent = '⚠️ High protein target';
-                        statusLabel.style.color = '#fbbf24'; // yellow
+                        statusLabel.style.color = '#b45309'; // yellow
                     } else if (protein === 0 && carbs === 0 && fat === 0) {
                         statusLabel.textContent = 'Set your macro targets';
-                        statusLabel.style.color = '#a1a1aa'; // default
+                        statusLabel.style.color = '#555960'; // default
                     } else {
                         statusLabel.textContent = 'Ready to generate';
-                        statusLabel.style.color = '#a1a1aa'; // default
+                        statusLabel.style.color = '#555960'; // default
                     }
                 }
             }, 500);
@@ -1120,7 +706,7 @@
                 
                 showPlaceholder('Select a tab and generate a meal.');
                 statusLabel.textContent = 'Cleared. Ready to go!';
-                statusLabel.style.color = '#a1a1aa';
+                statusLabel.style.color = '#555960';
             });
 
             // Keyboard shortcuts
@@ -1190,19 +776,39 @@
             
             // --- FEATURED PLATE ---
 
+            let featuredInFlight = false;
             async function handleFeatured() {
+                if (featuredInFlight) return; // ignore rapid re-triggers
+                featuredInFlight = true;
                 showLoadingState('Looking at what\'s being served right now...');
                 try {
                     const date = mealDate.value || todayLocal();
-                    const r = await fetch(`${API_BASE_URL}/api/featured?date=${encodeURIComponent(date)}`);
-                    const data = await r.json();
+                    const r = await fetch(
+                        `${API_BASE_URL}/api/featured?date=${encodeURIComponent(date)}`,
+                        { signal: AbortSignal.timeout(30000) }
+                    );
+                    if (r.status === 503) throw new Error('503:still_loading');
+                    if (r.status === 429) throw new Error('429:rate_limit');
+                    const text = await r.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        throw new Error(`Server error (status ${r.status}).`);
+                    }
                     if (!r.ok) {
                         throw new Error(data.error || `Server error (status ${r.status}).`);
                     }
                     displayFeatured(data);
                     retryCount = 0;
                 } catch (error) {
-                    handleApiError(error);
+                    if (error.name === 'TimeoutError') {
+                        handleApiError(new Error('Request timed out. Please try again.'));
+                    } else {
+                        handleApiError(error);
+                    }
+                } finally {
+                    featuredInFlight = false;
                 }
             }
 
@@ -1210,7 +816,7 @@
                 if (!data.currently_serving || !data.plate) {
                     // Outside meal hours, or no plate could be built
                     statusLabel.textContent = data.next_meal_hint || 'Nothing being served right now.';
-                    statusLabel.style.color = '#fbbf24';
+                    statusLabel.style.color = '#b45309';
                     resultHeader.textContent = 'Nothing on the line right now';
                     plateNote.classList.remove('hidden');
                     plateNoteText.textContent =
@@ -1300,7 +906,9 @@
 
             function setActiveTab(tabName) {
                 tabButtons.forEach(btn => {
-                    btn.classList.toggle('active', btn.dataset.tab === tabName);
+                    const isActive = btn.dataset.tab === tabName;
+                    btn.classList.toggle('active', isActive);
+                    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
                 });
                 tabContents.forEach(content => {
                     content.classList.toggle('active', content.id === tabName);
@@ -1317,7 +925,7 @@
                     tabName === 'featured' ? 'Right Now' : 'Manual'
                 );
                 statusLabel.textContent = `Switched to ${tabNameText} tab.`;
-                statusLabel.style.color = '#a1a1aa';
+                statusLabel.style.color = '#555960';
 
                 // Auto-fetch the featured plate when switching to that tab
                 if (tabName === 'featured') {
@@ -1329,7 +937,7 @@
                 generateButton.disabled = true;
                 generateButton.innerHTML = '<span class="spinner-inline"></span> Finding...';
                 statusLabel.textContent = message;
-                statusLabel.style.color = '#a1a1aa';
+                statusLabel.style.color = '#555960';
                 
                 resultsPlaceholder.classList.add('hidden');
                 resultsContent.classList.add('hidden');
@@ -1339,7 +947,7 @@
 
             function showPlaceholder(message) {
                 statusLabel.textContent = message;
-                statusLabel.style.color = '#a1a1aa';
+                statusLabel.style.color = '#555960';
                 resultsPlaceholder.classList.remove('hidden');
                 resultsContent.classList.add('hidden');
                 loadingSpinner.classList.add('hidden');
@@ -1363,7 +971,7 @@
                     if (retryCount < MAX_RETRIES) {
                         retryCount++;
                         statusLabel.textContent = `Server is waking up... Retry ${retryCount}/${MAX_RETRIES} in 5s`;
-                        statusLabel.style.color = '#fbbf24'; // yellow
+                        statusLabel.style.color = '#b45309'; // yellow
                         
                         currentRetryTimeout = setTimeout(() => {
                             generateButton.click();
@@ -1382,7 +990,7 @@
 
             function displayResult(result, noteText) {
                 statusLabel.textContent = `✅ Found a meal at ${result.court}!`;
-                statusLabel.style.color = '#22c55e'; // green
+                statusLabel.style.color = '#15803d'; // green
 
                 // 1. Set Header — include the date being planned for, in a friendly format
                 const dateLabel = result.date ? formatDateLabel(result.date) : '';
@@ -1406,23 +1014,32 @@
                 result.plan.forEach(item => {
                     const card = document.createElement('div');
                     card.className = 'item-card';
-                    
+                    card.setAttribute('role', 'listitem');
+
                     // Add animation
                     card.style.opacity = '0';
                     card.style.transform = 'translateY(10px)';
-                    
-                    card.innerHTML = `
-                        <div class="item-info">
-                            <h4>${item.name}</h4>
-                            <p>${item.serving_size || ''}</p>
-                        </div>
-                        <div class="item-macros">
-                            <span class="p">P: ${(item.p || 0).toFixed(0)}g</span>
-                            <span class="c">C: ${(item.c || 0).toFixed(0)}g</span>
-                            <span class="f">F: ${(item.f || 0).toFixed(0)}g</span>
-                        </div>
-                    `;
-                    
+
+                    // Build with textContent so item names from the Purdue API
+                    // can't inject markup.
+                    const info = document.createElement('div');
+                    info.className = 'item-info';
+                    const h4 = document.createElement('h4');
+                    h4.textContent = item.name || 'Unnamed item';
+                    const size = document.createElement('p');
+                    size.textContent = item.serving_size || '';
+                    info.append(h4, size);
+
+                    const macros = document.createElement('div');
+                    macros.className = 'item-macros';
+                    [['p', 'P'], ['c', 'C'], ['f', 'F']].forEach(([key, letter]) => {
+                        const span = document.createElement('span');
+                        span.className = key;
+                        span.textContent = `${letter}: ${Math.round(item[key] || 0)}g`;
+                        macros.appendChild(span);
+                    });
+
+                    card.append(info, macros);
                     mealPlanItems.appendChild(card);
                     
                     // Trigger animation
@@ -1463,8 +1080,8 @@
                         labels: labels,
                         datasets: [{
                             data: calories,
-                            backgroundColor: ['#6ee7b7', '#7dd3fc', '#fde047'],
-                            borderColor: '#3f3f46',
+                            backgroundColor: ['#2e7d52', '#2f6fb0', '#c39a3b'],
+                            borderColor: '#ffffff',
                             borderWidth: 2
                         }]
                     },
@@ -1474,16 +1091,16 @@
                         plugins: {
                             legend: {
                                 labels: {
-                                    color: 'white',
+                                    color: '#1c1c1c',
                                     font: { size: 12 }
                                 }
                             },
                             tooltip: {
                                 callbacks: {
                                     label: (context) => {
-                                        let value = context.parsed;
-                                        let total = context.chart.getDatasetMeta(0).total;
-                                        let percentage = ((value / total)* 100).toFixed(0);
+                                        const value = context.parsed;
+                                        const total = context.chart.getDatasetMeta(0).total;
+                                        const percentage = total ? Math.round((value / total) * 100) : 0;
                                         return `${context.label}: ${percentage}% of calories`;
                                     }
                                 }

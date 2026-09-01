@@ -160,7 +160,9 @@ def health_check():
 def api_find_meal():
     engine = get_engine()
     try:
-        data = request.json or {}
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Request body must be a JSON object."}), 400
         targets = data.get('targets', {})
         meal_periods = data.get('meal_periods', [])
         dietary_filters = data.get('dietary_filters', {})
@@ -180,6 +182,15 @@ def api_find_meal():
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
+        # On a cold start the menu for this date isn't in memory yet. Rather than
+        # blocking the request for the full Purdue fetch (and risking the
+        # client's timeout), load in the background and tell the client to retry.
+        if not engine.has_data(date_str):
+            engine.ensure_loaded_async(date_str)
+            return jsonify({
+                "error": "Menu data is still loading, please retry in a few seconds."
+            }), 503
+
         result = engine.find_best_meal(
             targets,
             meal_periods,
@@ -198,8 +209,8 @@ def api_find_meal():
 
         return jsonify(result)
 
-    except Exception as e:
-        app.logger.error(f"Error in /api/find_meal: {e}")
+    except Exception:
+        app.logger.exception("Error in /api/find_meal")
         return jsonify({"error": "An internal error occurred."}), 500
 
 @app.route("/api/featured", methods=["GET"])
@@ -219,8 +230,8 @@ def api_featured():
     try:
         result = engine.featured_plate(date_str=date_str)
         return jsonify(result)
-    except Exception as e:
-        app.logger.error(f"Error in /api/featured: {e}")
+    except Exception:
+        app.logger.exception("Error in /api/featured")
         return jsonify({"error": "An internal error occurred."}), 500
 
 

@@ -22,6 +22,10 @@ class Config:
     
     # Cache settings
     CACHE_PREFIX_MENU = "menu_cache_"
+    # How long a cached menu for today-or-later stays trusted. Purdue keeps
+    # editing the current day's menu and publishes future days late, so a stale
+    # snapshot must be re-fetched. Past dates never expire.
+    CACHE_TTL_HOURS = 12
     
     # Validation limits
     MAX_MACRO_TARGET = 500  # grams

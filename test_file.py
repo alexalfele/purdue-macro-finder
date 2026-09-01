@@ -94,10 +94,105 @@ class TestMealFinder(unittest.TestCase):
         penalties = Config.PENALTIES
         
         score, totals = self.finder._calculate_score(meal_plan, targets, weights, penalties)
-        
+
         # Score should be positive due to carb excess
         self.assertGreater(score, 0)
-        
+
+    def test_get_numeric_value_tolerates_messy_labels(self):
+        """Malformed labels return 0.0 or the leading number, never raise."""
+        self.assertEqual(self.finder._get_numeric_value("< 1 g"), 1.0)
+        self.assertEqual(self.finder._get_numeric_value("1.2.3 oz"), 1.2)
+        self.assertEqual(self.finder._get_numeric_value("no digits here"), 0.0)
+        self.assertEqual(self.finder._get_numeric_value("."), 0.0)
+
+
+class TestResponseHandling(unittest.TestCase):
+    """Menu-response gating and cache freshness."""
+
+    def setUp(self):
+        self.finder = MealFinder()
+
+    def test_response_has_menu_rejects_empty(self):
+        self.assertFalse(self.finder._response_has_menu(None))
+        self.assertFalse(self.finder._response_has_menu({"errors": [{"message": "x"}]}))
+        self.assertFalse(
+            self.finder._response_has_menu({"data": {"diningCourtByName": None}})
+        )
+        self.assertFalse(
+            self.finder._response_has_menu(
+                {"data": {"diningCourtByName": {"dailyMenu": None}}}
+            )
+        )
+
+    def test_response_has_menu_accepts_real_data(self):
+        payload = {"data": {"diningCourtByName": {"dailyMenu": {"meals": []}}}}
+        self.assertTrue(self.finder._response_has_menu(payload))
+
+    def test_cache_past_date_never_stale(self):
+        self.assertTrue(self.finder._cache_is_fresh({}, "2000-01-01"))
+
+    def test_cache_today_needs_recent_timestamp(self):
+        from datetime import datetime, timedelta
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        fresh = {"timestamp": datetime.now().isoformat()}
+        stale = {"timestamp": (datetime.now() - timedelta(hours=48)).isoformat()}
+        self.assertTrue(self.finder._cache_is_fresh(fresh, today))
+        self.assertFalse(self.finder._cache_is_fresh(stale, today))
+        self.assertFalse(self.finder._cache_is_fresh({}, today))
+
+
+class TestMealPeriodsAt(unittest.TestCase):
+    """Time-of-day -> open meal periods."""
+
+    def _at(self, weekday, hour, minute=0):
+        # 2026-06-01 is a Monday; +offset walks the week.
+        from datetime import datetime, timedelta
+
+        monday = datetime(2026, 6, 1, hour, minute)
+        return monday + timedelta(days=weekday)
+
+    def test_weekday_lunch(self):
+        serving, hint = MealFinder._meal_periods_at(self._at(2, 12, 30))
+        self.assertIn("Lunch", serving)
+        self.assertIsNone(hint)
+
+    def test_before_open(self):
+        serving, hint = MealFinder._meal_periods_at(self._at(2, 5))
+        self.assertEqual(serving, [])
+        self.assertIn("7 am", hint)
+
+    def test_late_night(self):
+        serving, hint = MealFinder._meal_periods_at(self._at(2, 22))
+        self.assertEqual(serving, [])
+        self.assertIn("tomorrow", hint)
+
+    def test_weekend_brunch(self):
+        serving, _ = MealFinder._meal_periods_at(self._at(5, 10))  # Saturday
+        self.assertIn("Brunch", serving)
+
+    def test_no_brunch_on_weekday(self):
+        serving, _ = MealFinder._meal_periods_at(self._at(2, 10))  # Wednesday
+        self.assertNotIn("Brunch", serving)
+
+
+class TestNormalizeDate(unittest.TestCase):
+    def test_valid_passthrough(self):
+        self.assertEqual(MealFinder.normalize_date("2026-06-15"), "2026-06-15")
+
+    def test_empty_defaults_to_today(self):
+        from datetime import date
+
+        self.assertEqual(MealFinder.normalize_date(None), date.today().strftime("%Y-%m-%d"))
+
+    def test_bad_format_raises(self):
+        with self.assertRaises(ValueError):
+            MealFinder.normalize_date("06/15/2026")
+
+    def test_far_future_raises(self):
+        with self.assertRaises(ValueError):
+            MealFinder.normalize_date("2099-01-01")
+
 
 class TestConfig(unittest.TestCase):
     """Test cases for Config class"""
@@ -199,6 +294,72 @@ class TestInputValidation(unittest.TestCase):
         
         self.assertFalse(valid)
         self.assertIn("Invalid meal period", error)
+
+
+class TestFindMealEndpoint(unittest.TestCase):
+    """HTTP-level behaviour of /api/find_meal."""
+
+    def setUp(self):
+        import app as app_module
+
+        self.app_module = app_module
+        self.client = app_module.app.test_client()
+        # Use a stub engine so no live Purdue calls happen.
+        self._real_get_engine = app_module.get_engine
+
+        class _StubEngine:
+            loaded = False
+
+            def normalize_date(self, raw):
+                return MealFinder.normalize_date(raw)
+
+            def has_data(self, date_str):
+                return self.loaded
+
+            def ensure_loaded_async(self, date_str):
+                self.loaded = True  # pretend the background load finished
+
+            def find_best_meal(self, *a, **kw):
+                return {
+                    "court": "Wiley", "meal_name": "Lunch", "plan": [],
+                    "totals": {"p": 0, "c": 0, "f": 0}, "date": kw.get("date_str"),
+                }
+
+        self.stub = _StubEngine()
+        app_module.get_engine = lambda: self.stub
+
+    def tearDown(self):
+        self.app_module.get_engine = self._real_get_engine
+
+    def _payload(self):
+        return {
+            "targets": {"p": 40, "c": 60, "f": 20},
+            "meal_periods": ["Lunch"],
+            "date": "2026-06-15",
+        }
+
+    def test_cold_start_returns_503(self):
+        resp = self.client.post("/api/find_meal", json=self._payload())
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("loading", resp.get_json()["error"].lower())
+
+    def test_second_call_succeeds(self):
+        self.client.post("/api/find_meal", json=self._payload())  # warms the stub
+        resp = self.client.post("/api/find_meal", json=self._payload())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["court"], "Wiley")
+
+    def test_non_json_body_is_400_not_500(self):
+        resp = self.client.post(
+            "/api/find_meal", data="not json", content_type="text/plain"
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_invalid_date_is_400(self):
+        bad = self._payload()
+        bad["date"] = "15-06-2026"
+        resp = self.client.post("/api/find_meal", json=bad)
+        self.assertEqual(resp.status_code, 400)
 
 
 if __name__ == '__main__':

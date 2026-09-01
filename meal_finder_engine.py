@@ -81,11 +81,21 @@ class MealFinder:
     # --- numeric / scoring (unchanged from the original implementation) ---
 
     def _get_numeric_value(self, label_str):
-        """Extracts a number from a label like '15g' -> 15.0."""
+        """Extracts a number from a label like '15g' -> 15.0.
+
+        Tolerates messy labels ('< 1 g', 'N/A', '1.2.3 oz') without raising.
+        """
         if not label_str:
             return 0.0
-        numeric_part = re.search(r"[\d.]+", label_str)
-        return float(numeric_part.group(0)) if numeric_part else 0.0
+        # Match a single well-formed number so inputs like "1.2.3" don't blow up
+        # float(). Leading number wins ("2.5g (per cup)" -> 2.5).
+        match = re.search(r"\d+(?:\.\d+)?", str(label_str))
+        if not match:
+            return 0.0
+        try:
+            return float(match.group(0))
+        except ValueError:
+            return 0.0
 
     def _calculate_score(self, meal_plan, targets, weights, penalties):
         """Scores a meal plan; lower is better. Penalises under-protein / over-carb / over-fat."""
@@ -142,6 +152,38 @@ class MealFinder:
             return court, None, False
 
     @staticmethod
+    def _response_has_menu(menu_data):
+        """True if a GraphQL response actually carries a published daily menu.
+
+        Purdue returns HTTP 200 with `dailyMenu: null` (or a GraphQL `errors`
+        block) for days it hasn't published yet. Caching those to disk would
+        pin an empty menu forever, so we only persist real data.
+        """
+        if not isinstance(menu_data, dict) or "data" not in menu_data:
+            return False
+        court = (menu_data.get("data") or {}).get("diningCourtByName")
+        return bool(court and court.get("dailyMenu"))
+
+    def _cache_is_fresh(self, payload, date_str):
+        """Whether an on-disk cache payload may still be used.
+
+        Past dates never go stale. Today-or-later is trusted only for
+        Config.CACHE_TTL_HOURS after it was written.
+        """
+        if not isinstance(payload, dict):
+            return False
+        if date_str < self._today():
+            return True
+        ts = payload.get("timestamp")
+        if not ts:
+            return False
+        try:
+            written = datetime.fromisoformat(ts)
+        except ValueError:
+            return False
+        return datetime.now() - written < timedelta(hours=Config.CACHE_TTL_HOURS)
+
+    @staticmethod
     def _build_indices(item_list):
         by_court, by_meal = {}, {}
         for item in item_list:
@@ -178,9 +220,13 @@ class MealFinder:
             if os.path.exists(cache_file):
                 try:
                     with open(cache_file, "r") as f:
-                        cached_data = json.load(f).get("data", {})
-                    logger.info(f"Loaded {cache_file} from disk.")
-                except (json.JSONDecodeError, IOError) as e:
+                        payload = json.load(f)
+                    if self._cache_is_fresh(payload, date_str):
+                        cached_data = payload.get("data", {})
+                        logger.info(f"Loaded {cache_file} from disk.")
+                    else:
+                        logger.info(f"Cache {cache_file} is stale; refetching.")
+                except (json.JSONDecodeError, IOError, TypeError) as e:
                     logger.error(f"Error loading cache file {cache_file}: {e}")
 
             logger.info(f"Loading menu data for {date_str}...")
@@ -194,15 +240,15 @@ class MealFinder:
 
                 for future in futures:
                     court, menu_data, was_fetched = future.result()
-                    if was_fetched:
+                    # Only persist responses that actually contain a menu, so an
+                    # unpublished future date isn't cached as permanently empty.
+                    if was_fetched and self._response_has_menu(menu_data):
                         cached_data[court] = menu_data
                         needs_to_save_cache = True
 
-                    if not (menu_data and "data" in menu_data):
+                    if not self._response_has_menu(menu_data):
                         continue
-                    dining_court = (menu_data.get("data") or {}).get("diningCourtByName")
-                    if not (dining_court and dining_court.get("dailyMenu")):
-                        continue
+                    dining_court = menu_data["data"]["diningCourtByName"]
 
                     for meal in dining_court["dailyMenu"]["meals"]:
                         for station in meal["stations"]:
@@ -265,6 +311,21 @@ class MealFinder:
         """Public entry point — loads the given date if not already loaded."""
         self._load_menu_for_date(date_str)
 
+    def ensure_loaded_async(self, date_str):
+        """Kick off a load for `date_str` in the background and return at once.
+
+        Lets the API answer a cold request with 503 instead of blocking for the
+        full Purdue fetch. Idempotent — a load already in flight is a no-op.
+        """
+        if self.has_data(date_str):
+            return
+        threading.Thread(
+            target=self._load_menu_for_date,
+            args=(date_str,),
+            daemon=True,
+            name=f"MenuLoader-{date_str}",
+        ).start()
+
     def start_background_loaders(self):
         """Preloads today's menu data so the first user request is instant."""
         today = self._today()
@@ -301,6 +362,10 @@ class MealFinder:
                     remaining_pool, min(items_needed, len(remaining_pool))
                 )
 
+        current_score, _ = self._calculate_score(
+            current_solution, targets, weights, penalties
+        )
+
         for _ in range(iterations):
             if temp <= 1:
                 break
@@ -317,9 +382,6 @@ class MealFinder:
             elif action == "remove" and len(neighbor) > Config.MIN_ITEMS:
                 neighbor.pop(random.randrange(len(neighbor)))
 
-            current_score, _ = self._calculate_score(
-                current_solution, targets, weights, penalties
-            )
             neighbor_score, neighbor_totals = self._calculate_score(
                 neighbor, targets, weights, penalties
             )
@@ -328,11 +390,12 @@ class MealFinder:
                 (current_score - neighbor_score) / temp
             ):
                 current_solution = neighbor
+                current_score = neighbor_score
 
             if neighbor_score < best_score:
                 best_score = neighbor_score
                 best_totals = neighbor_totals
-                best_solution = neighbor
+                best_solution = list(neighbor)
 
             temp *= cooling_rate
 
@@ -448,16 +511,11 @@ class MealFinder:
         if currently:
             return currently, None
 
-        # Nothing open — figure out the next thing
+        # Meal windows run back-to-back from 7 am to 9 pm, so the only gaps are
+        # before breakfast and after dinner.
         if h < 7:
             return [], "Breakfast starts at 7 am"
-        if 10 <= h < 11:
-            return [], "Lunch starts at 11 am"
-        if 14 <= h < 14:  # never reached but keeps logic readable
-            return [], "Late Lunch starts at 2 pm"
-        if 21 <= h:
-            return [], "Breakfast starts at 7 am tomorrow"
-        return [], "Next meal is starting soon"
+        return [], "Breakfast starts at 7 am tomorrow"
 
     def _build_featured_plate(self, items, court, meal_name):
         """Picks 3 complementary items from a single court+meal pool: a high-protein
