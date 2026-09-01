@@ -31,5 +31,5 @@ Or just double-click `start_app.command` from the parent folder if you're on mac
 ## Stack
 
 - **Backend**: Flask + gunicorn, Flask-Limiter for rate limiting
-- **Frontend**: Single-file vanilla JS in `index.html`
+- **Frontend**: Static pages served by Flask (`index.html` plus `terms.html` / `privacy.html`), vanilla JS, no build step
 - **Optimization**: Simulated annealing with configurable weights/penalties (`config.py`)

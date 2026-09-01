@@ -146,6 +146,16 @@ def index():
     """Serves the single-page frontend."""
     return send_from_directory(APP_ROOT, "index.html")
 
+@app.route("/terms")
+def terms():
+    """Serves the Terms of Service page."""
+    return send_from_directory(APP_ROOT, "terms.html")
+
+@app.route("/privacy")
+def privacy():
+    """Serves the Privacy Policy page."""
+    return send_from_directory(APP_ROOT, "privacy.html")
+
 @app.route("/api/health")
 def health_check():
     """Lightweight liveness probe for the keep-alive pinger."""

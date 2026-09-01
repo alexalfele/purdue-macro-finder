@@ -3,561 +3,549 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Find the perfect meal at Purdue dining courts based on your macro targets">
+    <meta name="description" content="Build a Purdue dining hall meal that matches your protein, carb, and fat targets.">
     <title>Purdue Macro Finder</title>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        /* ===== Purdue Macro Finder — light, Purdue-branded theme ===== */
         :root {
-            /* Brand */
-            --gold: #CFB991;          /* Boilermaker (aged) gold */
-            --gold-bright: #DAAA00;   /* Rush gold (accent) */
-            --gold-soft: #efe7d3;     /* light gold tint */
-            --gold-deep: #8a7444;
-            --black: #0b0b0c;
-            --coal: #1c1c1c;
-
-            /* Surfaces */
-            --bg: #f3f2ee;
-            --surface: #ffffff;
-            --surface-2: #faf9f5;
-            --border: #e6e2d8;
-            --border-strong: #d8d3c6;
-
-            /* Text */
-            --text: #1c1c1c;
-            --text-secondary: #555960;  /* Steel */
-            --text-muted: #83868f;      /* Cool gray */
-
-            /* Macros */
-            --macro-protein: #2e7d52;
-            --macro-carb: #2f6fb0;
-            --macro-fat: #c39a3b;
-
-            /* Effects */
-            --shadow-sm: 0 1px 2px rgba(28, 28, 28, 0.05);
-            --shadow-md: 0 6px 20px rgba(28, 28, 28, 0.08);
-            --radius: 10px;
-            --radius-lg: 14px;
-            --ring: 0 0 0 3px rgba(207, 185, 145, 0.45);
+            --paper: #f2efe6;
+            --surface: #f8f6ef;
+            --surface-sunk: #ece8db;
+            --ink: #1b1a17;
+            --ink-soft: #46433c;
+            --ink-mute: #6f6a5f;
+            --rule: #d5cfc0;
+            --rule-strong: #b7b09c;
+            --gold: #a9822f;
+            --gold-rule: #cfb991;
+            --alert: #8a3324;
+            --ok: #4f6438;
         }
 
         * { box-sizing: border-box; }
+
         html, body { min-height: 100%; }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: var(--bg);
-            color: var(--text);
             margin: 0;
+            background: var(--paper);
+            color: var(--ink);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 16px;
             line-height: 1.6;
             -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
         }
 
-        /* ===== Top brand bar ===== */
-        .site-header {
-            background: var(--black);
-            border-bottom: 3px solid var(--gold);
+        h1, h2, h3, h4 {
+            font-family: Georgia, "Times New Roman", Times, serif;
+            font-weight: 700;
+            color: var(--ink);
+            letter-spacing: 0.01em;
         }
 
+        a {
+            color: var(--ink);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            text-decoration-color: var(--gold);
+        }
+        a:hover { text-decoration-color: var(--ink); }
+
+        *:focus-visible {
+            outline: 2px solid var(--gold);
+            outline-offset: 1px;
+        }
+
+        /* Masthead */
+        .site-header { border-bottom: 3px double var(--gold-rule); }
         .site-header__inner {
-            max-width: 1200px;
+            max-width: 1100px;
             margin: 0 auto;
-            padding: 0.9rem 1.5rem;
+            padding: 1.4rem 1.5rem 1.2rem;
             display: flex;
-            align-items: center;
+            align-items: baseline;
             justify-content: space-between;
             gap: 1rem;
         }
-
-        .brand { display: inline-flex; align-items: center; gap: 0.7rem; text-decoration: none; }
-
-        .brand__logo {
-            width: 34px; height: 34px; flex: none;
-            display: grid; place-items: center;
-            background: var(--gold); color: var(--black);
-            font-family: 'Manrope', 'Inter', sans-serif; font-weight: 800; font-size: 1.15rem;
-            border-radius: 8px;
+        .wordmark { font-family: Georgia, serif; font-size: 1.5rem; font-weight: 700; }
+        .wordmark-sub {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            color: var(--ink-mute);
         }
 
-        .brand__text {
-            font-family: 'Manrope', 'Inter', sans-serif;
-            font-size: 1.15rem; font-weight: 600; letter-spacing: -0.01em;
-            color: #fff;
-        }
-        .brand__text strong { color: var(--gold); font-weight: 800; }
+        /* Page */
+        .page { max-width: 1100px; margin: 0 auto; padding: 1.75rem 1.5rem 2.5rem; }
+        .page-intro { margin: 0 0 1.75rem; color: var(--ink-soft); max-width: 60ch; }
 
-        .brand__tag {
-            color: #b9bbc0; font-size: 0.78rem; font-weight: 500;
-            text-transform: uppercase; letter-spacing: 0.08em;
-        }
-
-        /* ===== Page ===== */
-        .page { max-width: 1200px; margin: 0 auto; padding: 1.75rem 1.5rem 3rem; }
-        .page-intro { margin: 0 0 1.5rem; color: var(--text-secondary); font-size: 1rem; }
-
-        .muted-small { color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 0.75rem; }
-        .muted-small a { color: var(--gold-deep); font-weight: 600; }
-
-        /* ===== Layout ===== */
-        .app-container { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
-        @media (min-width: 1024px) {
-            .app-container { grid-template-columns: 38% 1fr; gap: 1.75rem; align-items: start; }
+        .app-container { display: grid; grid-template-columns: 1fr; gap: 1.75rem; }
+        @media (min-width: 960px) {
+            .app-container { grid-template-columns: 20rem 1fr; gap: 2.5rem; align-items: start; }
         }
 
         .controls-panel, .results-panel {
             background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: 1.5rem;
-            box-shadow: var(--shadow-sm);
-            display: flex;
-            flex-direction: column;
+            border: 1px solid var(--rule-strong);
+            padding: 1.4rem;
         }
-        .results-panel { min-height: 480px; }
+        .results-panel { min-height: 26rem; }
 
-        /* ===== Tabs ===== */
-        .tab-buttons {
-            display: flex; gap: 0.25rem; padding: 0.28rem;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 1.5rem;
+            border-bottom: 1px solid var(--rule);
             margin-bottom: 1.4rem;
         }
         .tab-button {
-            flex: 1; background: transparent; border: none;
-            color: var(--text-secondary);
-            padding: 0.6rem 0.75rem; cursor: pointer;
-            font-size: 0.9rem; font-weight: 600; font-family: inherit;
-            border-radius: 7px; transition: all 0.15s ease;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            padding: 0 0 0.6rem;
+            font: inherit;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--ink-mute);
+            cursor: pointer;
         }
-        .tab-button:hover { color: var(--coal); background: rgba(0, 0, 0, 0.04); }
-        .tab-button.active {
-            background: var(--gold); color: var(--black);
-            box-shadow: var(--shadow-sm);
-        }
-        .tab-button:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 2px; }
+        .tab-button:hover { color: var(--ink); }
+        .tab-button.active { color: var(--ink); border-bottom-color: var(--gold); }
 
-        .tab-content { display: none; animation: fade-in 0.22s ease-out; }
+        .tab-content { display: none; }
         .tab-content.active { display: block; }
-        @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* ===== Date picker ===== */
+        /* Date row */
         .date-picker-row {
-            display: flex; align-items: center; gap: 0.6rem;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 0.5rem 0.6rem 0.5rem 0.9rem;
-            margin-bottom: 1.25rem;
-            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding-bottom: 1.2rem;
+            margin-bottom: 1.2rem;
+            border-bottom: 1px solid var(--rule);
         }
-        .date-picker-row:focus-within { border-color: var(--gold); box-shadow: var(--ring); }
         .date-picker-row label {
-            margin: 0; font-size: 0.72rem; font-weight: 700; color: var(--text-secondary);
-            text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap;
+            margin: 0;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--ink-mute);
+            white-space: nowrap;
         }
-        .date-picker-row input[type="date"] { flex: 1; width: auto; padding: 0.4rem 0.6rem; font-size: 0.92rem; color-scheme: light; }
+        .date-picker-row input[type="date"] { flex: 1; color-scheme: light; }
 
         .date-today-button {
-            padding: 0.45rem 0.85rem;
-            background: var(--gold-soft); color: var(--gold-deep);
-            border: 1px solid var(--gold); border-radius: 8px;
-            font-size: 0.8rem; font-weight: 700; font-family: inherit; cursor: pointer;
-            white-space: nowrap; transition: all 0.15s ease;
+            padding: 0.4rem 0.7rem;
+            background: none;
+            border: 1px solid var(--rule-strong);
+            font: inherit;
+            font-size: 0.8rem;
+            color: var(--ink-soft);
+            cursor: pointer;
+            white-space: nowrap;
         }
-        .date-today-button:hover { background: var(--gold); color: var(--black); }
+        .date-today-button:hover { border-color: var(--ink); color: var(--ink); }
 
-        .meal-time { color: var(--text-muted); font-size: 0.78rem; font-weight: 400; margin-left: 0.4rem; font-variant-numeric: tabular-nums; }
+        .meal-time { color: var(--ink-mute); font-size: 0.8rem; font-weight: 400; margin-left: 0.35rem; }
 
-        /* ===== Collapsible cards ===== */
-        .collapsible-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            margin-bottom: 0.85rem; overflow: hidden;
-            transition: border-color 0.15s ease;
+        /* Field groups */
+        .field-group { border-top: 1px solid var(--rule); }
+        .field-group:first-of-type { border-top: none; }
+        .field-group > summary {
+            padding: 0.9rem 0;
+            font-family: Georgia, serif;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
-        .collapsible-card:hover { border-color: var(--border-strong); }
-        .collapsible-card summary {
-            font-size: 0.95rem; font-weight: 700; padding: 0.85rem 1rem; cursor: pointer;
-            list-style: none; user-select: none; display: flex; align-items: center; gap: 0.5rem; color: var(--coal);
-        }
-        .collapsible-card summary::-webkit-details-marker { display: none; }
-        .collapsible-card summary::before {
-            content: ''; width: 6px; height: 6px;
-            border-right: 2px solid var(--gold-deep); border-bottom: 2px solid var(--gold-deep);
-            transform: rotate(-45deg); transition: transform 0.2s ease; margin-right: 4px;
-        }
-        .collapsible-card[open] summary::before { transform: rotate(45deg); }
-        .collapsible-card[open] summary { border-bottom: 1px solid var(--border); }
-        .collapsible-card > div { padding: 1rem; }
-
-        /* ===== Cards / forms ===== */
-        .card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 1.2rem 1.35rem; margin-bottom: 1.2rem;
-        }
-        .card h2, .card h3 {
-            font-family: 'Manrope', 'Inter', sans-serif;
-            font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em;
-            margin: 0 0 0.85rem; padding-bottom: 0.65rem;
-            border-bottom: 1px solid var(--border); color: var(--coal);
-        }
+        .field-group > summary::-webkit-details-marker { display: none; }
+        .field-group > summary::after { content: "+"; color: var(--ink-mute); font-weight: 400; }
+        .field-group[open] > summary::after { content: "\2212"; }
+        .field-group > div { padding-bottom: 1.1rem; }
 
         label {
-            display: block; font-size: 0.72rem; font-weight: 700; color: var(--text-secondary);
-            text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem;
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--ink-mute);
+            margin-bottom: 0.35rem;
         }
 
-        input[type="number"], input[type="date"], input[type="password"], input[type="text"], select, textarea {
-            width: 100%; padding: 0.65rem 0.8rem;
-            background: var(--surface); color: var(--text);
-            border: 1px solid var(--border-strong); border-radius: 8px;
-            font-size: 0.95rem; font-family: inherit;
-            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        input[type="number"], input[type="date"], input[type="text"], select, textarea {
+            width: 100%;
+            padding: 0.55rem 0.65rem;
+            background: var(--paper);
+            color: var(--ink);
+            border: 1px solid var(--rule-strong);
+            border-radius: 0;
+            font: inherit;
+            font-size: 0.95rem;
         }
-        input[type="number"]:focus, input[type="date"]:focus, input[type="password"]:focus,
-        input[type="text"]:focus, select:focus, textarea:focus {
-            outline: none; border-color: var(--gold); box-shadow: var(--ring);
-        }
-        input[type="number"]:hover, input[type="date"]:hover, input[type="password"]:hover,
-        input[type="text"]:hover, select:hover, textarea:hover { border-color: var(--gold); }
-        textarea { resize: vertical; min-height: 88px; line-height: 1.5; }
+        input[type="number"]:focus, input[type="date"]:focus, input[type="text"]:focus,
+        select:focus, textarea:focus { outline: none; border-color: var(--ink); }
 
-        .macro-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.85rem; }
+        .macro-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+        @media (max-width: 520px) { .macro-grid { grid-template-columns: 1fr; } }
 
         .filters label {
-            display: flex; align-items: center; gap: 0.55rem; color: var(--coal);
-            padding: 0.35rem 0; margin: 0; cursor: pointer; font-size: 0.92rem;
-            text-transform: none; letter-spacing: 0; font-weight: 500; transition: color 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            padding: 0.3rem 0;
+            margin: 0;
+            font-size: 0.95rem;
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: 0;
+            color: var(--ink);
+            cursor: pointer;
         }
-        .filters label:hover { color: var(--gold-deep); }
-        input[type="checkbox"] { width: 1.05em; height: 1.05em; accent-color: var(--gold-deep); cursor: pointer; }
+        input[type="checkbox"] { width: 1em; height: 1em; accent-color: var(--ink); cursor: pointer; }
 
         .form-header {
-            font-family: 'Manrope', 'Inter', sans-serif; font-size: 1.05rem !important;
-            font-weight: 700; letter-spacing: -0.01em; color: var(--coal);
+            font-family: Georgia, serif;
+            font-size: 1rem;
+            font-weight: 700;
+            margin: 0 0 0.5rem;
         }
+        .muted-small { color: var(--ink-mute); font-size: 0.88rem; margin: 0; }
 
-        /* ===== Buttons ===== */
-        .cta-footer { margin-top: auto; padding-top: 1.25rem; border-top: 1px solid var(--border); }
+        /* Actions */
+        .cta-footer { margin-top: 1.5rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); }
         .cta-button {
-            width: 100%; padding: 0.9rem;
-            background: var(--gold); color: var(--black);
-            border: none; border-radius: 10px;
-            font-size: 1rem; font-weight: 800; font-family: inherit; letter-spacing: 0.01em;
-            cursor: pointer; transition: all 0.15s ease; box-shadow: var(--shadow-sm);
+            width: 100%;
+            padding: 0.8rem;
+            background: var(--ink);
+            color: var(--paper);
+            border: none;
+            border-radius: 0;
+            font: inherit;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
         }
-        .cta-button:hover { background: var(--gold-bright); box-shadow: var(--shadow-md); }
-        .cta-button:active { transform: translateY(1px); }
-        .cta-button:disabled { background: #e6e3db; color: #a7a39a; cursor: not-allowed; box-shadow: none; }
-        .cta-button:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+        .cta-button:hover { background: #000; }
+        .cta-button:disabled { background: var(--rule-strong); color: var(--surface); cursor: not-allowed; }
 
         #reset-button {
-            width: 100%; padding: 0.6rem; background: transparent; color: var(--text-secondary);
-            border: 1px solid var(--border-strong); border-radius: 8px;
-            font-size: 0.9rem; font-family: inherit; font-weight: 600; cursor: pointer; margin-top: 0.6rem;
-            transition: all 0.15s ease;
+            width: 100%;
+            padding: 0.6rem;
+            margin-top: 0.5rem;
+            background: none;
+            border: 1px solid var(--rule-strong);
+            border-radius: 0;
+            font: inherit;
+            font-size: 0.9rem;
+            color: var(--ink-soft);
+            cursor: pointer;
         }
-        #reset-button:hover { background: var(--surface-2); color: var(--coal); border-color: var(--gold); }
+        #reset-button:hover { border-color: var(--ink); color: var(--ink); }
 
         #status-label {
-            font-size: 0.825rem; color: var(--text-secondary); text-align: center;
-            margin: 0.85rem 0 0; min-height: 1.25em; transition: color 0.2s ease;
+            margin: 0.9rem 0 0;
+            font-size: 0.85rem;
+            color: var(--ink-mute);
+            text-align: center;
+            min-height: 1.2em;
         }
 
-        /* ===== Loading / placeholder ===== */
+        /* Results */
         .hidden { display: none !important; }
 
-        #results-placeholder { text-align: center; color: var(--text-secondary); padding: 3.5rem 1.5rem; margin: auto; }
-        #results-placeholder .placeholder-icon {
-            width: 68px; height: 68px; margin: 0 auto 1.25rem; border-radius: 50%;
-            background: var(--gold-soft); border: 1px solid var(--gold);
-            display: flex; align-items: center; justify-content: center; color: var(--gold-deep); font-size: 2rem;
+        #results-placeholder, #loading-spinner {
+            color: var(--ink-mute);
+            padding: 3rem 0.5rem;
+            text-align: center;
         }
-        #results-placeholder h3 {
-            font-family: 'Manrope', 'Inter', sans-serif; font-size: 1.3rem; font-weight: 700;
-            letter-spacing: -0.01em; color: var(--coal); margin: 0 0 0.4rem;
-        }
-        #results-placeholder p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
+        #results-placeholder p, #loading-spinner p { margin: 0.75rem auto 0; max-width: 42ch; }
 
-        #loading-spinner { text-align: center; padding: 3.5rem 0; color: var(--text-secondary); margin: auto; }
-        #loading-spinner p { margin-top: 1rem; font-size: 0.9rem; }
         .spinner {
-            width: 44px; height: 44px; border: 3px solid var(--border-strong);
-            border-top-color: var(--gold); border-right-color: var(--gold-bright);
-            border-radius: 50%; display: inline-block; box-sizing: border-box;
-            animation: rotation 0.9s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
+            width: 22px;
+            height: 22px;
+            border: 2px solid var(--rule-strong);
+            border-top-color: var(--ink);
+            border-radius: 50%;
+            display: inline-block;
+            animation: spin 0.8s linear infinite;
         }
         .spinner-inline {
-            width: 14px; height: 14px; border: 2px solid rgba(0, 0, 0, 0.25); border-top-color: var(--black);
-            border-radius: 50%; display: inline-block; box-sizing: border-box;
-            animation: rotation 0.8s linear infinite; margin-right: 0.5rem; vertical-align: -2px;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            border-top-color: var(--paper);
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+            vertical-align: -1px;
+            animation: spin 0.8s linear infinite;
         }
-        @keyframes rotation { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* ===== Results ===== */
         #result-header {
-            font-family: 'Manrope', 'Inter', sans-serif; font-size: 1.5rem; font-weight: 800;
-            letter-spacing: -0.02em; color: var(--coal); margin: 0 0 1.2rem; line-height: 1.15;
+            font-size: 1.4rem;
+            margin: 0 0 1.2rem;
+            padding-bottom: 0.6rem;
+            border-bottom: 2px solid var(--ink);
         }
 
-        .explanation-card { background: var(--gold-soft); border: 1px solid var(--gold); }
-        .explanation-card h3 { color: var(--gold-deep); border-bottom-color: rgba(138, 116, 68, 0.25); }
-        .explanation-card p { color: var(--coal); line-height: 1.55; margin: 0; font-size: 0.92rem; }
+        .section { margin-bottom: 1.6rem; }
+        .section > h3 {
+            font-size: 1rem;
+            margin: 0 0 0.7rem;
+            padding-bottom: 0.35rem;
+            border-bottom: 1px solid var(--rule);
+        }
 
-        /* ===== Meal items (list rows, like the dining menu) ===== */
-        #meal-plan-items { border-top: 1px solid var(--border); }
+        #plate-note {
+            background: var(--surface-sunk);
+            border: 1px solid var(--rule-strong);
+            padding: 0.9rem 1rem;
+        }
+        #plate-note h3 { font-size: 0.95rem; margin: 0 0 0.35rem; }
+        #plate-note p { margin: 0; font-size: 0.92rem; color: var(--ink-soft); }
+
+        .chart-container { max-width: 15rem; margin: 0.5rem auto 0; }
+
+        #meal-plan-items { display: flex; flex-direction: column; }
         .item-card {
-            display: grid; grid-template-columns: 1fr auto; gap: 1rem; align-items: center;
-            background: var(--surface); padding: 0.85rem 0.4rem 0.85rem 0.75rem;
-            border-bottom: 1px solid var(--border); position: relative; transition: background 0.15s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 1rem;
+            padding: 0.7rem 0;
+            border-bottom: 1px solid var(--rule);
         }
-        .item-card::before {
-            content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-            background: var(--gold); opacity: 0; transition: opacity 0.15s ease;
-        }
-        .item-card:hover { background: var(--surface-2); }
-        .item-card:hover::before { opacity: 1; }
-        .item-info h4 { font-size: 0.98rem; font-weight: 700; margin: 0 0 0.15rem; color: var(--coal); letter-spacing: -0.01em; }
-        .item-info p { font-size: 0.8rem; color: var(--text-muted); margin: 0; }
-        .item-macros { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.76rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-        .item-macros span {
-            display: inline-flex; align-items: center; justify-content: center; min-width: 54px;
-            padding: 0.16rem 0.5rem; border-radius: 6px; border: 1px solid transparent;
-        }
-        .item-macros .p { color: var(--macro-protein); background: rgba(46, 125, 82, 0.10); border-color: rgba(46, 125, 82, 0.22); }
-        .item-macros .c { color: var(--macro-carb); background: rgba(47, 111, 176, 0.10); border-color: rgba(47, 111, 176, 0.22); }
-        .item-macros .f { color: #9a7a1f; background: rgba(195, 154, 59, 0.14); border-color: rgba(195, 154, 59, 0.30); }
-
-        /* ===== Chart ===== */
-        .chart-container { position: relative; max-width: 280px; margin: 0.5rem auto; }
-
-        /* ===== Responsive ===== */
-        @media (max-width: 768px) {
-            .page { padding: 1.25rem 1rem 2.5rem; }
-            .site-header__inner { padding: 0.8rem 1rem; }
-            .brand__tag { display: none; }
-            .macro-grid { grid-template-columns: 1fr; }
-            .item-card { grid-template-columns: 1fr; }
-            .item-macros { flex-direction: row; gap: 0.5rem; }
+        .item-card:last-child { border-bottom: none; }
+        .item-info h4 { font-family: inherit; font-size: 0.95rem; font-weight: 600; margin: 0; }
+        .item-info p { margin: 0.15rem 0 0; font-size: 0.82rem; color: var(--ink-mute); }
+        .item-macros {
+            display: flex;
+            gap: 0.9rem;
+            font-size: 0.85rem;
+            color: var(--ink-soft);
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
         }
 
-        /* ===== Accessibility ===== */
+        /* Footer */
+        .site-footer {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 1.5rem;
+            border-top: 1px solid var(--rule);
+            color: var(--ink-mute);
+            font-size: 0.82rem;
+        }
+        .site-footer nav { display: flex; flex-wrap: wrap; gap: 1.25rem; margin-bottom: 0.5rem; }
+        .site-footer p { margin: 0; max-width: 70ch; }
+
         @media (prefers-reduced-motion: reduce) {
-            * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+            * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
         }
-        *:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 2px; }
     </style>
 </head>
 <body>
     <header class="site-header">
         <div class="site-header__inner">
-            <span class="brand">
-                <span class="brand__logo" aria-hidden="true">P</span>
-                <span class="brand__text">Purdue <strong>Macro Finder</strong></span>
-            </span>
-            <span class="brand__tag">Dining macro planner</span>
+            <span class="wordmark">Purdue Macro Finder</span>
+            <span class="wordmark-sub">Dining hall macro planner</span>
         </div>
     </header>
 
     <main class="page">
-        <p class="page-intro">Hit your macros with what's actually being served on campus.</p>
+        <p class="page-intro">
+            Enter your protein, carb, and fat targets and the tool builds a plate
+            from a Purdue dining court's published menu for the day you choose.
+        </p>
 
         <div class="app-container">
-        <div class="controls-panel">
-            
-            <div class="tab-buttons" role="tablist" aria-label="Meal finding methods">
-                <button class="tab-button active" id="manual-tab" data-tab="manual" role="tab" aria-selected="true" aria-controls="manual">
-                    Manual
-                </button>
-                <button class="tab-button" id="featured-tab" data-tab="featured" role="tab" aria-selected="false" aria-controls="featured">
-                    Right Now
-                </button>
-            </div>
+            <div class="controls-panel">
+                <div class="tabs" role="tablist" aria-label="Meal finding methods">
+                    <button class="tab-button active" id="manual-tab" data-tab="manual" role="tab" aria-selected="true" aria-controls="manual">
+                        Manual
+                    </button>
+                    <button class="tab-button" id="featured-tab" data-tab="featured" role="tab" aria-selected="false" aria-controls="featured">
+                        Right now
+                    </button>
+                </div>
 
-            <!-- Shared date picker — applies to both tabs -->
-            <div class="date-picker-row">
-                <label for="meal-date">Date</label>
-                <input type="date" id="meal-date" aria-label="Date to plan a meal for">
-                <button type="button" id="date-today-button" class="date-today-button" aria-label="Reset to today">Today</button>
-            </div>
+                <div class="date-picker-row">
+                    <label for="meal-date">Date</label>
+                    <input type="date" id="meal-date" aria-label="Date to plan a meal for">
+                    <button type="button" id="date-today-button" class="date-today-button" aria-label="Reset to today">Today</button>
+                </div>
 
-            <div id="manual" class="tab-content active" role="tabpanel" aria-labelledby="manual-tab">
-                <form id="manual-form">
-                    
-                    <details class="collapsible-card" open>
-                        <summary>Target Macros</summary>
-                        <div class="macro-grid">
-                            <div>
-                                <label for="target-protein">Protein (g)</label>
-                                <input type="number" id="target-protein" value="40" min="0" max="500" aria-label="Target protein in grams">
+                <div id="manual" class="tab-content active" role="tabpanel" aria-labelledby="manual-tab">
+                    <form id="manual-form">
+                        <details class="field-group" open>
+                            <summary>Target macros</summary>
+                            <div class="macro-grid">
+                                <div>
+                                    <label for="target-protein">Protein (g)</label>
+                                    <input type="number" id="target-protein" value="40" min="0" max="500" aria-label="Target protein in grams">
+                                </div>
+                                <div>
+                                    <label for="target-carbs">Carbs (g)</label>
+                                    <input type="number" id="target-carbs" value="60" min="0" max="500" aria-label="Target carbs in grams">
+                                </div>
+                                <div>
+                                    <label for="target-fat">Fat (g)</label>
+                                    <input type="number" id="target-fat" value="20" min="0" max="500" aria-label="Target fat in grams">
+                                </div>
                             </div>
-                            <div>
-                                <label for="target-carbs">Carbs (g)</label>
-                                <input type="number" id="target-carbs" value="60" min="0" max="500" aria-label="Target carbs in grams">
-                            </div>
-                            <div>
-                                <label for="target-fat">Fat (g)</label>
-                                <input type="number" id="target-fat" value="20" min="0" max="500" aria-label="Target fat in grams">
-                            </div>
-                        </div>
-                    </details>
-                    
-                    <details class="collapsible-card" open>
-                        <summary>Dietary Filters</summary>
-                        <div class="filters">
-                            <label>
-                                <input type="checkbox" data-filter="Vegetarian" aria-label="Vegetarian only">
-                                Vegetarian
-                            </label>
-                            <label>
-                                <input type="checkbox" data-filter="Vegan" aria-label="Vegan only">
-                                Vegan
-                            </label>
-                            <label>
-                                <input type="checkbox" data-filter="No Gluten" aria-label="No gluten">
-                                No Gluten
-                            </label>
-                        </div>
-                    </details>
+                        </details>
 
-                    <details class="collapsible-card">
-                        <summary>Meal Periods</summary>
-                        <div class="filters">
-                            <label>
-                                <input type="checkbox" name="meal_period" value="Breakfast" aria-label="Include breakfast">
-                                Breakfast <span class="meal-time">7-10 am</span>
-                            </label>
-                            <label>
-                                <input type="checkbox" name="meal_period" value="Brunch" aria-label="Include brunch">
-                                Brunch <span class="meal-time">weekends, Hillenbrand</span>
-                            </label>
-                            <label>
-                                <input type="checkbox" name="meal_period" value="Lunch" checked aria-label="Include lunch">
-                                Lunch <span class="meal-time">11 am - 2 pm</span>
-                            </label>
-                            <label>
-                                <input type="checkbox" name="meal_period" value="Late Lunch" aria-label="Include late lunch">
-                                Late Lunch <span class="meal-time">2-5 pm</span>
-                            </label>
-                            <label>
-                                <input type="checkbox" name="meal_period" value="Dinner" checked aria-label="Include dinner">
-                                Dinner <span class="meal-time">5-9 pm</span>
-                            </label>
-                        </div>
-                    </details>
-                </form>
-            </div>
+                        <details class="field-group" open>
+                            <summary>Dietary filters</summary>
+                            <div class="filters">
+                                <label>
+                                    <input type="checkbox" data-filter="Vegetarian" aria-label="Vegetarian only">
+                                    Vegetarian
+                                </label>
+                                <label>
+                                    <input type="checkbox" data-filter="Vegan" aria-label="Vegan only">
+                                    Vegan
+                                </label>
+                                <label>
+                                    <input type="checkbox" data-filter="No Gluten" aria-label="No gluten">
+                                    No gluten
+                                </label>
+                            </div>
+                        </details>
 
-            <div id="featured" class="tab-content" role="tabpanel" aria-labelledby="featured-tab">
-                <div class="card">
-                    <h2 class="form-header">Featured Plate</h2>
-                    <p class="muted-small" style="margin-bottom: 0;">
-                        A balanced plate from a dining court that's serving right now.
-                        We pick a high-protein main, a complementary carb, and a side.
+                        <details class="field-group">
+                            <summary>Meal periods</summary>
+                            <div class="filters">
+                                <label>
+                                    <input type="checkbox" name="meal_period" value="Breakfast" aria-label="Include breakfast">
+                                    Breakfast <span class="meal-time">7 to 10 am</span>
+                                </label>
+                                <label>
+                                    <input type="checkbox" name="meal_period" value="Brunch" aria-label="Include brunch">
+                                    Brunch <span class="meal-time">weekends, Hillenbrand</span>
+                                </label>
+                                <label>
+                                    <input type="checkbox" name="meal_period" value="Lunch" checked aria-label="Include lunch">
+                                    Lunch <span class="meal-time">11 am to 2 pm</span>
+                                </label>
+                                <label>
+                                    <input type="checkbox" name="meal_period" value="Late Lunch" aria-label="Include late lunch">
+                                    Late lunch <span class="meal-time">2 to 5 pm</span>
+                                </label>
+                                <label>
+                                    <input type="checkbox" name="meal_period" value="Dinner" checked aria-label="Include dinner">
+                                    Dinner <span class="meal-time">5 to 9 pm</span>
+                                </label>
+                            </div>
+                        </details>
+                    </form>
+                </div>
+
+                <div id="featured" class="tab-content" role="tabpanel" aria-labelledby="featured-tab">
+                    <p class="form-header">Featured plate</p>
+                    <p class="muted-small">
+                        A balanced plate from a dining court that is serving right now:
+                        a high-protein main, a carbohydrate side, and a vegetable side.
                     </p>
                 </div>
-            </div>
 
-            <div class="cta-footer">
-                <button id="generate-button" class="cta-button" aria-label="Generate meal plan">
-                    Find My Meal 🍽️
-                </button>
-                <button id="reset-button" aria-label="Clear all inputs and results">
-                    Clear
-                </button>
-                <p id="status-label" role="status" aria-live="polite">Select a tab and generate a meal.</p>
-            </div>
-
-        </div>
-
-        <div class="results-panel">
-            
-            <div id="results-placeholder">
-                <div class="placeholder-icon" aria-hidden="true">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 11h18"></path>
-                        <path d="M5 11a7 7 0 0 1 14 0"></path>
-                        <path d="M3 14h18l-1.6 4.6a2 2 0 0 1-1.9 1.4H6.5a2 2 0 0 1-1.9-1.4L3 14z"></path>
-                    </svg>
+                <div class="cta-footer">
+                    <button id="generate-button" class="cta-button">Find a meal</button>
+                    <button id="reset-button" aria-label="Clear all inputs and results">Clear</button>
+                    <p id="status-label" role="status" aria-live="polite">Set your targets, then find a meal.</p>
                 </div>
-                <h3>Your meal awaits</h3>
-                <p>Pick a tab and we'll build a plate from today's dining-court menus.</p>
             </div>
 
-            <div id="loading-spinner" class="hidden" role="status" aria-live="polite">
-                <div class="spinner"></div>
-                <p>Finding your meal...</p>
-            </div>
-
-            <div id="results-content" class="hidden">
-                <h2 id="result-header">Your Optimized Meal</h2>
-                
-                <div id="plate-note" class="card explanation-card hidden">
-                    <h3>Notes</h3>
-                    <p id="plate-note-text"></p>
+            <div class="results-panel">
+                <div id="results-placeholder">
+                    <p>
+                        Set your targets and meal periods, then select Find a meal.
+                        The plate and its macro breakdown appear here.
+                    </p>
                 </div>
-                
-                <div class="card">
-                    <h3>Macro Breakdown</h3>
-                    <div class="chart-container">
-                        <canvas id="macro-chart" aria-label="Macro breakdown pie chart"></canvas>
+
+                <div id="loading-spinner" class="hidden" role="status" aria-live="polite">
+                    <div class="spinner"></div>
+                    <p>Finding your meal.</p>
+                </div>
+
+                <div id="results-content" class="hidden">
+                    <h2 id="result-header">Your meal</h2>
+
+                    <div id="plate-note" class="section hidden">
+                        <h3>Note</h3>
+                        <p id="plate-note-text"></p>
+                    </div>
+
+                    <div class="section">
+                        <h3>Macro breakdown</h3>
+                        <div class="chart-container">
+                            <canvas id="macro-chart" aria-label="Macro breakdown chart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Items</h3>
+                        <div id="meal-plan-items" role="list"></div>
                     </div>
                 </div>
-
-                <div class="card">
-                    <h3>Items</h3>
-                    <div id="meal-plan-items" role="list">
-                        </div>
-                </div>
             </div>
         </div>
-    </div>
     </main>
+
+    <footer class="site-footer">
+        <nav>
+            <a href="/terms">Terms of Service</a>
+            <a href="/privacy">Privacy Policy</a>
+        </nav>
+        <p>
+            An independent project. Not affiliated with, endorsed by, or sponsored by
+            Purdue University or Purdue University Dining. Menu and nutrition data comes
+            from Purdue Dining and may be incomplete or out of date. This tool does not
+            provide medical or nutritional advice.
+        </p>
+    </footer>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             // --- 1. CONFIGURATION ---
-            // Empty string = same-origin (works for local Flask AND a Render deploy
-            // that serves the frontend itself). Override at the URL with ?api=... if
-            // you ever want to point this static page at a different backend.
+            // Empty string means same-origin, which works for local Flask and for a
+            // Render deploy that serves this page itself. Override with ?api=... to
+            // point the page at a different backend.
             const API_OVERRIDE = new URLSearchParams(window.location.search).get('api');
             const API_BASE_URL = API_OVERRIDE || '';
-            const RETRY_DELAY = 5000; // 5 seconds
+            const RETRY_DELAY = 5000;
             const MAX_RETRIES = 3;
-            
-            // --- 2. GET REFERENCES TO HTML ELEMENTS ---
-            
-            // Tabs
+
+            const COLOR_INFO = '#6f6a5f';
+            const COLOR_WARN = '#7a5a2a';
+            const COLOR_ERROR = '#8a3324';
+            const COLOR_OK = '#4f6438';
+
+            // --- 2. ELEMENT REFERENCES ---
             const tabButtons = document.querySelectorAll('.tab-button');
             const tabContents = document.querySelectorAll('.tab-content');
-            
-            // Forms
             const manualForm = document.getElementById('manual-form');
 
-            // Shared date picker
             const mealDate = document.getElementById('meal-date');
             const dateTodayButton = document.getElementById('date-today-button');
 
-            // Manual Form Inputs
             const targetProtein = document.getElementById('target-protein');
             const targetCarbs = document.getElementById('target-carbs');
             const targetFat = document.getElementById('target-fat');
             const filterCheckboxes = document.querySelectorAll('.filters input[data-filter]');
             const mealPeriodCheckboxes = document.querySelectorAll('input[name="meal_period"]');
 
-            // Initialize date picker to today's local date
             const todayLocal = () => {
                 const d = new Date();
                 const yyyy = d.getFullYear();
@@ -570,31 +558,27 @@
                 mealDate.value = todayLocal();
             });
 
-            // Buttons & Status
             const generateButton = document.getElementById('generate-button');
             const resetButton = document.getElementById('reset-button');
             const statusLabel = document.getElementById('status-label');
-            
-            // Results Panel
+
             const resultsPlaceholder = document.getElementById('results-placeholder');
             const loadingSpinner = document.getElementById('loading-spinner');
             const resultsContent = document.getElementById('results-content');
-            
-            // Result Content Parts
+
             const resultHeader = document.getElementById('result-header');
             const plateNote = document.getElementById('plate-note');
             const plateNoteText = document.getElementById('plate-note-text');
             const chartCanvas = document.getElementById('macro-chart').getContext('2d');
             const mealPlanItems = document.getElementById('meal-plan-items');
-            
-            // --- 3. GLOBAL STATE VARIABLES ---
+
+            // --- 3. STATE ---
             let activeTab = 'manual';
             let macroChart = null;
             let currentRetryTimeout = null;
             let retryCount = 0;
 
-            // --- 4. UTILITY FUNCTIONS ---
-            
+            // --- 4. UTILITIES ---
             function debounce(func, wait) {
                 let timeout;
                 return function executedFunction(...args) {
@@ -607,7 +591,7 @@
                 };
             }
 
-            // "2026-04-30" -> "Today" / "Tomorrow" / "Thu, Apr 30"
+            // "2026-04-30" becomes "Today", "Tomorrow", or "Thu, Apr 30".
             function formatDateLabel(yyyymmdd) {
                 if (!yyyymmdd) return '';
                 const [y, m, d] = yyyymmdd.split('-').map(Number);
@@ -626,32 +610,30 @@
             function validateMacroInput(value, macroName) {
                 const num = parseInt(value) || 0;
                 if (num < 0) {
-                    return { valid: false, message: `${macroName} cannot be negative` };
+                    return { valid: false, message: `${macroName} cannot be negative.` };
                 }
                 if (num > 500) {
-                    return { valid: false, message: `${macroName} seems unreasonably high` };
+                    return { valid: false, message: `${macroName} seems unreasonably high.` };
                 }
                 return { valid: true };
             }
 
             // --- 5. INPUT VALIDATION ---
-            
             const validateInputs = debounce(() => {
-                if (activeTab === 'manual') {
-                    const protein = parseInt(targetProtein.value) || 0;
-                    const carbs = parseInt(targetCarbs.value) || 0;
-                    const fat = parseInt(targetFat.value) || 0;
-                    
-                    if (protein > 100) {
-                        statusLabel.textContent = '⚠️ High protein target';
-                        statusLabel.style.color = '#b45309'; // yellow
-                    } else if (protein === 0 && carbs === 0 && fat === 0) {
-                        statusLabel.textContent = 'Set your macro targets';
-                        statusLabel.style.color = '#555960'; // default
-                    } else {
-                        statusLabel.textContent = 'Ready to generate';
-                        statusLabel.style.color = '#555960'; // default
-                    }
+                if (activeTab !== 'manual') return;
+                const protein = parseInt(targetProtein.value) || 0;
+                const carbs = parseInt(targetCarbs.value) || 0;
+                const fat = parseInt(targetFat.value) || 0;
+
+                if (protein > 100) {
+                    statusLabel.textContent = 'That is a high protein target.';
+                    statusLabel.style.color = COLOR_WARN;
+                } else if (protein === 0 && carbs === 0 && fat === 0) {
+                    statusLabel.textContent = 'Set your macro targets.';
+                    statusLabel.style.color = COLOR_INFO;
+                } else {
+                    statusLabel.textContent = 'Ready to find a meal.';
+                    statusLabel.style.color = COLOR_INFO;
                 }
             }, 500);
 
@@ -660,19 +642,15 @@
             targetFat.addEventListener('input', validateInputs);
 
             // --- 6. EVENT LISTENERS ---
-
-            // Tab switching
             tabButtons.forEach(button => {
                 button.addEventListener('click', () => {
                     activeTab = button.dataset.tab;
                     setActiveTab(activeTab);
-                    validateInputs(); // Update status label on tab switch
+                    validateInputs();
                 });
             });
 
-            // Main "Generate" button
             generateButton.addEventListener('click', () => {
-                // Clear any pending retries
                 if (currentRetryTimeout) {
                     clearTimeout(currentRetryTimeout);
                     currentRetryTimeout = null;
@@ -685,34 +663,24 @@
                     handleManualSearch();
                 }
             });
-            
-            // Reset button
+
             resetButton.addEventListener('click', () => {
                 manualForm.reset();
-
-                // Reset date to today
                 mealDate.value = todayLocal();
-
-                // Re-check default meal periods (Lunch + Dinner)
                 mealPeriodCheckboxes.forEach(cb => {
                     cb.checked = (cb.value === 'Lunch' || cb.value === 'Dinner');
                 });
-                
-                // Destroy chart if exists
                 if (macroChart) {
                     macroChart.destroy();
                     macroChart = null;
                 }
-                
-                showPlaceholder('Select a tab and generate a meal.');
-                statusLabel.textContent = 'Cleared. Ready to go!';
-                statusLabel.style.color = '#555960';
+                showPlaceholder('Cleared. Set your targets, then find a meal.');
             });
 
-            // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !generateButton.disabled && 
-                    (document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT')) {
+                const tag = document.activeElement.tagName;
+                if (e.key === 'Enter' && !generateButton.disabled &&
+                    tag !== 'TEXTAREA' && tag !== 'INPUT') {
                     generateButton.click();
                 }
                 if (e.key === 'Escape') {
@@ -720,39 +688,30 @@
                 }
             });
 
-            // --- 7. CORE API FUNCTIONS ---
-
+            // --- 7. API CALLS ---
             async function handleManualSearch() {
-                // Validate inputs
                 const protein = parseInt(targetProtein.value) || 0;
                 const carbs = parseInt(targetCarbs.value) || 0;
                 const fat = parseInt(targetFat.value) || 0;
-                
+
                 const proteinValidation = validateMacroInput(protein, 'Protein');
                 if (!proteinValidation.valid) {
                     showPlaceholder(proteinValidation.message);
                     return;
                 }
-                
-                // Get selected meal periods
+
                 const selectedMeals = [];
                 mealPeriodCheckboxes.forEach(cb => {
-                    if (cb.checked) {
-                        selectedMeals.push(cb.value);
-                    }
+                    if (cb.checked) selectedMeals.push(cb.value);
                 });
-                
                 if (selectedMeals.length === 0) {
-                    showPlaceholder('Please select at least one meal period');
+                    showPlaceholder('Select at least one meal period.');
                     return;
                 }
 
-                // Get dietary filters
                 const selectedFilters = {};
                 filterCheckboxes.forEach(cb => {
-                    if (cb.checked) {
-                        selectedFilters[cb.dataset.filter] = true;
-                    }
+                    if (cb.checked) selectedFilters[cb.dataset.filter] = true;
                 });
 
                 const payload = {
@@ -763,7 +722,7 @@
                     date: mealDate.value || todayLocal(),
                 };
 
-                showLoadingState('Calculating the best meal plan...');
+                showLoadingState('Building the best plate.');
 
                 try {
                     const result = await makeApiCall('/api/find_meal', payload);
@@ -773,14 +732,12 @@
                     handleApiError(error);
                 }
             }
-            
-            // --- FEATURED PLATE ---
 
             let featuredInFlight = false;
             async function handleFeatured() {
-                if (featuredInFlight) return; // ignore rapid re-triggers
+                if (featuredInFlight) return;
                 featuredInFlight = true;
-                showLoadingState('Looking at what\'s being served right now...');
+                showLoadingState('Checking what is being served right now.');
                 try {
                     const date = mealDate.value || todayLocal();
                     const r = await fetch(
@@ -803,7 +760,7 @@
                     retryCount = 0;
                 } catch (error) {
                     if (error.name === 'TimeoutError') {
-                        handleApiError(new Error('Request timed out. Please try again.'));
+                        handleApiError(new Error('Request timed out. Try again.'));
                     } else {
                         handleApiError(error);
                     }
@@ -814,9 +771,8 @@
 
             function displayFeatured(data) {
                 if (!data.currently_serving || !data.plate) {
-                    // Outside meal hours, or no plate could be built
-                    statusLabel.textContent = data.next_meal_hint || 'Nothing being served right now.';
-                    statusLabel.style.color = '#b45309';
+                    statusLabel.textContent = data.next_meal_hint || 'Nothing is being served right now.';
+                    statusLabel.style.color = COLOR_WARN;
                     resultHeader.textContent = 'Nothing on the line right now';
                     plateNote.classList.remove('hidden');
                     plateNoteText.textContent =
@@ -828,12 +784,10 @@
                     loadingSpinner.classList.add('hidden');
                     resultsContent.classList.remove('hidden');
                     generateButton.disabled = false;
-                    generateButton.innerHTML = 'Refresh Featured Plate 🍽️';
+                    generateButton.textContent = 'Refresh featured plate';
                     return;
                 }
 
-                // We have a plate — reuse the existing result rendering by shaping
-                // the payload like a meal-plan response, plus a custom header.
                 const result = {
                     court: data.plate.court,
                     meal_name: data.plate.meal_name,
@@ -842,11 +796,11 @@
                     date: data.date,
                 };
                 const note =
-                    `Featured at ${data.plate.court} ${data.plate.meal_name} right now. ` +
-                    `A balanced 3-item plate built from items currently being served.`;
+                    `Featured at ${data.plate.court} for ${data.plate.meal_name}, ` +
+                    `built from items being served right now.`;
                 displayResult(result, note);
-                resultHeader.textContent = `Featured Plate — ${data.plate.court}`;
-                generateButton.innerHTML = 'Refresh Featured Plate 🍽️';
+                resultHeader.textContent = `Featured plate at ${data.plate.court}`;
+                generateButton.textContent = 'Refresh featured plate';
             }
 
             async function makeApiCall(endpoint, payload) {
@@ -855,55 +809,35 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload),
-                        signal: AbortSignal.timeout(30000) // 30 second timeout
+                        signal: AbortSignal.timeout(30000),
                     });
 
-                    // --- START OF FIX ---
-                    
-                    // First, check if the response was successful.
                     if (!response.ok) {
-                        if (response.status === 503) {
-                            throw new Error('503:still_loading');
-                        }
-                        if (response.status === 429) {
-                            throw new Error('429:rate_limit');
-                        }
-                        
-                        // Try to get the error text from the server
+                        if (response.status === 503) throw new Error('503:still_loading');
+                        if (response.status === 429) throw new Error('429:rate_limit');
+
                         const errorText = await response.text();
-                        
-                        // Try to parse it as JSON in case the server *did* send a JSON error
                         try {
                             const errorData = JSON.parse(errorText);
-                            throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                            throw new Error(errorData.error || `HTTP error, status ${response.status}.`);
                         } catch (e) {
-                            // This is where the HTML error is caught.
-                            console.error("Server returned non-JSON error:", errorText);
-                            throw new Error(`Server returned an invalid HTML response (Status: ${response.status}). Check console for details.`);
+                            console.error('Server returned a non-JSON error:', errorText);
+                            throw new Error(`Server returned an unexpected response (status ${response.status}).`);
                         }
                     }
-                    
-                    // --- END OF FIX ---
 
-                    // If we get here, response.ok was true, so we can safely parse JSON.
                     const data = await response.json();
-                    
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
-                    
+                    if (data.error) throw new Error(data.error);
                     return data;
-                    
                 } catch (error) {
                     if (error.name === 'TimeoutError') {
-                        throw new Error('Request timed out. Please try again.');
+                        throw new Error('Request timed out. Try again.');
                     }
                     throw error;
                 }
             }
 
-            // --- 8. UI/DOM HELPER FUNCTIONS ---
-
+            // --- 8. DOM HELPERS ---
             function setActiveTab(tabName) {
                 tabButtons.forEach(btn => {
                     const isActive = btn.dataset.tab === tabName;
@@ -914,20 +848,17 @@
                     content.classList.toggle('active', content.id === tabName);
                 });
 
-                // Tailor the Generate button label per tab
                 if (tabName === 'featured') {
-                    generateButton.innerHTML = 'Show Featured Plate 🍽️';
+                    generateButton.textContent = 'Show featured plate';
                 } else {
-                    generateButton.innerHTML = 'Find My Meal 🍽️';
+                    generateButton.textContent = 'Find a meal';
                 }
 
-                const tabNameText = (
-                    tabName === 'featured' ? 'Right Now' : 'Manual'
-                );
-                statusLabel.textContent = `Switched to ${tabNameText} tab.`;
-                statusLabel.style.color = '#555960';
+                statusLabel.textContent = tabName === 'featured'
+                    ? 'Showing what is being served right now.'
+                    : 'Set your targets, then find a meal.';
+                statusLabel.style.color = COLOR_INFO;
 
-                // Auto-fetch the featured plate when switching to that tab
                 if (tabName === 'featured') {
                     handleFeatured();
                 }
@@ -935,93 +866,71 @@
 
             function showLoadingState(message) {
                 generateButton.disabled = true;
-                generateButton.innerHTML = '<span class="spinner-inline"></span> Finding...';
+                generateButton.innerHTML = '<span class="spinner-inline"></span>Finding';
                 statusLabel.textContent = message;
-                statusLabel.style.color = '#555960';
-                
+                statusLabel.style.color = COLOR_INFO;
+
                 resultsPlaceholder.classList.add('hidden');
                 resultsContent.classList.add('hidden');
-        
                 loadingSpinner.classList.remove('hidden');
             }
 
             function showPlaceholder(message) {
                 statusLabel.textContent = message;
-                statusLabel.style.color = '#555960';
+                statusLabel.style.color = COLOR_INFO;
                 resultsPlaceholder.classList.remove('hidden');
                 resultsContent.classList.add('hidden');
                 loadingSpinner.classList.add('hidden');
                 generateButton.disabled = false;
-                generateButton.innerHTML = 'Find My Meal 🍽️';
+                generateButton.textContent = activeTab === 'featured' ? 'Show featured plate' : 'Find a meal';
             }
-            
+
             function handleApiError(error) {
-                // Handle rate limiting
                 if (error.message === '429:rate_limit') {
-                    showPlaceholder('⚠️ Too many requests. Please wait a minute and try again.');
+                    showPlaceholder('Too many requests. Wait a minute and try again.');
                     generateButton.disabled = true;
-                    setTimeout(() => {
-                        generateButton.disabled = false;
-                    }, 60000); // Re-enable after 1 minute
+                    setTimeout(() => { generateButton.disabled = false; }, 60000);
                     return;
                 }
-                
-                // Handle 503 retry logic
+
                 if (error.message === '503:still_loading') {
                     if (retryCount < MAX_RETRIES) {
                         retryCount++;
-                        statusLabel.textContent = `Server is waking up... Retry ${retryCount}/${MAX_RETRIES} in 5s`;
-                        statusLabel.style.color = '#b45309'; // yellow
-                        
-                        currentRetryTimeout = setTimeout(() => {
-                            generateButton.click();
-                        }, RETRY_DELAY);
-                        return;
-                    } else {
-                        showPlaceholder('Server is taking too long to respond. Please try again later.');
+                        statusLabel.textContent = `Server is waking up. Retry ${retryCount} of ${MAX_RETRIES} in 5 seconds.`;
+                        statusLabel.style.color = COLOR_WARN;
+                        currentRetryTimeout = setTimeout(() => { generateButton.click(); }, RETRY_DELAY);
                         return;
                     }
+                    showPlaceholder('The server is taking too long to respond. Try again later.');
+                    return;
                 }
-                
-                // Show normal error
+
                 showPlaceholder(`Error: ${error.message}`);
-                statusLabel.style.color = '#ef4444'; // red
+                statusLabel.style.color = COLOR_ERROR;
             }
 
             function displayResult(result, noteText) {
-                statusLabel.textContent = `✅ Found a meal at ${result.court}!`;
-                statusLabel.style.color = '#15803d'; // green
+                statusLabel.textContent = `Found a meal at ${result.court}.`;
+                statusLabel.style.color = COLOR_OK;
 
-                // 1. Set Header — include the date being planned for, in a friendly format
                 const dateLabel = result.date ? formatDateLabel(result.date) : '';
-                resultHeader.textContent = dateLabel
-                    ? `Your Meal — ${dateLabel}`
-                    : 'Your Optimized Meal';
+                resultHeader.textContent = dateLabel ? `Your meal for ${dateLabel}` : 'Your meal';
 
-                // 2. Show/Hide the optional note card (used by the "Right Now" tab)
                 if (noteText) {
                     plateNoteText.textContent = noteText;
                     plateNote.classList.remove('hidden');
                 } else {
                     plateNote.classList.add('hidden');
                 }
-                
-                // 3. Update Chart
+
                 updateMacroChart(result.totals);
-                
-                // 4. Build Item Cards
+
                 mealPlanItems.innerHTML = '';
                 result.plan.forEach(item => {
                     const card = document.createElement('div');
                     card.className = 'item-card';
                     card.setAttribute('role', 'listitem');
 
-                    // Add animation
-                    card.style.opacity = '0';
-                    card.style.transform = 'translateY(10px)';
-
-                    // Build with textContent so item names from the Purdue API
-                    // can't inject markup.
                     const info = document.createElement('div');
                     info.className = 'item-info';
                     const h4 = document.createElement('h4');
@@ -1034,41 +943,31 @@
                     macros.className = 'item-macros';
                     [['p', 'P'], ['c', 'C'], ['f', 'F']].forEach(([key, letter]) => {
                         const span = document.createElement('span');
-                        span.className = key;
-                        span.textContent = `${letter}: ${Math.round(item[key] || 0)}g`;
+                        span.textContent = `${letter} ${Math.round(item[key] || 0)} g`;
                         macros.appendChild(span);
                     });
 
                     card.append(info, macros);
                     mealPlanItems.appendChild(card);
-                    
-                    // Trigger animation
-                    setTimeout(() => {
-                        card.style.transition = 'all 0.3s ease';
-                        card.style.opacity = '1';
-                        card.style.transform = 'translateY(0)';
-                    }, 50);
                 });
 
-                // 5. Show results
                 resultsPlaceholder.classList.add('hidden');
                 loadingSpinner.classList.add('hidden');
                 resultsContent.classList.remove('hidden');
-                
+
                 generateButton.disabled = false;
-                generateButton.innerHTML = 'Find My Meal 🍽️';
+                generateButton.textContent = activeTab === 'featured' ? 'Refresh featured plate' : 'Find a meal';
             }
 
             function updateMacroChart(totals) {
                 const { p = 0, c = 0, f = 0 } = totals;
                 const calories = [p * 4, c * 4, f * 9];
                 const labels = [
-                    `Protein (${p.toFixed(0)}g)`, 
-                    `Carbs (${c.toFixed(0)}g)`, 
-                    `Fat (${f.toFixed(0)}g)`
+                    `Protein (${p.toFixed(0)} g)`,
+                    `Carbs (${c.toFixed(0)} g)`,
+                    `Fat (${f.toFixed(0)} g)`,
                 ];
 
-                // Destroy existing chart
                 if (macroChart) {
                     macroChart.destroy();
                     macroChart = null;
@@ -1080,20 +979,18 @@
                         labels: labels,
                         datasets: [{
                             data: calories,
-                            backgroundColor: ['#2e7d52', '#2f6fb0', '#c39a3b'],
-                            borderColor: '#ffffff',
-                            borderWidth: 2
-                        }]
+                            backgroundColor: ['#1b1a17', '#a9822f', '#9a9284'],
+                            borderColor: '#f8f6ef',
+                            borderWidth: 2,
+                        }],
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: true,
                         plugins: {
                             legend: {
-                                labels: {
-                                    color: '#1c1c1c',
-                                    font: { size: 12 }
-                                }
+                                position: 'bottom',
+                                labels: { color: '#1b1a17', font: { size: 12 }, boxWidth: 12 },
                             },
                             tooltip: {
                                 callbacks: {
@@ -1102,24 +999,17 @@
                                         const total = context.chart.getDatasetMeta(0).total;
                                         const percentage = total ? Math.round((value / total) * 100) : 0;
                                         return `${context.label}: ${percentage}% of calories`;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                                    },
+                                },
+                            },
+                        },
+                    },
                 });
             }
 
             // --- 9. INITIALIZE ---
             setActiveTab(activeTab);
-            validateInputs(); // Run once on load
-
-            // Add accessibility attributes
-            generateButton.setAttribute('aria-label', 'Generate meal plan');
-            loadingSpinner.setAttribute('role', 'status');
-            loadingSpinner.setAttribute('aria-live', 'polite');
-
-            console.log('Purdue Macro Finder initialized successfully!');
+            validateInputs();
         });
     </script>
 </body>
