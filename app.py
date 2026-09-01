@@ -39,9 +39,38 @@ def _load_dotenv(path):
 
 _load_dotenv(ENV_FILE)
 
-app = Flask(__name__, static_folder=APP_ROOT, static_url_path="")
-CORS(app)
+# static_folder=None: do NOT expose the project directory over HTTP. The three
+# HTML pages are served by explicit routes below; there are no other static
+# assets (CSS/JS are inline, Chart.js is loaded from a CDN).
+app = Flask(__name__, static_folder=None)
+# The API returns only public dining data, so cross-origin reads are fine, but
+# scope CORS to /api/* rather than opening the whole app.
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 logging.basicConfig(level=logging.INFO)
+
+
+@app.after_request
+def _security_headers(resp):
+    """Baseline hardening headers applied to every response."""
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    # Harmless over plain HTTP (browsers ignore it); enforced once on Render's HTTPS.
+    resp.headers.setdefault(
+        "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+    )
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'",
+    )
+    return resp
 
 # --- 2. CONFIGURE RATE LIMITING ---
 limiter = Limiter(
@@ -141,22 +170,28 @@ def validate_meal_periods(meal_periods):
     return True, None
 
 # --- 6. ROUTES ---
+# Static pages and the health probe are exempt from rate limiting so ordinary
+# browsing isn't throttled; the API endpoints below keep their strict limits.
 @app.route("/")
+@limiter.exempt
 def index():
     """Serves the single-page frontend."""
     return send_from_directory(APP_ROOT, "index.html")
 
 @app.route("/terms")
+@limiter.exempt
 def terms():
     """Serves the Terms of Service page."""
     return send_from_directory(APP_ROOT, "terms.html")
 
 @app.route("/privacy")
+@limiter.exempt
 def privacy():
     """Serves the Privacy Policy page."""
     return send_from_directory(APP_ROOT, "privacy.html")
 
 @app.route("/api/health")
+@limiter.exempt
 def health_check():
     """Lightweight liveness probe for the keep-alive pinger."""
     return jsonify({"status": "healthy", "message": "Purdue Macro Finder API is running."})

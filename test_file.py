@@ -362,5 +362,35 @@ class TestFindMealEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
 
+class TestSecurityHardening(unittest.TestCase):
+    """The app must not serve source/secret files and must send safe headers."""
+
+    def setUp(self):
+        import app as app_module
+        self.client = app_module.app.test_client()
+
+    def test_source_and_secret_files_are_not_served(self):
+        for path in ("/app.py", "/config.py", "/meal_finder_engine.py",
+                     "/.env", "/render.yaml", "/test_file.py",
+                     "/requirements.txt"):
+            resp = self.client.get(path)
+            self.assertEqual(resp.status_code, 404, f"{path} should not be reachable")
+
+    def test_pages_are_served(self):
+        for path in ("/", "/terms", "/privacy"):
+            self.assertEqual(self.client.get(path).status_code, 200)
+
+    def test_security_headers_present(self):
+        h = self.client.get("/").headers
+        self.assertEqual(h.get("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(h.get("X-Frame-Options"), "DENY")
+        self.assertIn("Strict-Transport-Security", h)
+        self.assertIn("default-src 'self'", h.get("Content-Security-Policy", ""))
+        self.assertIn("frame-ancestors 'none'", h.get("Content-Security-Policy", ""))
+
+    def test_no_admin_route(self):
+        self.assertEqual(self.client.get("/admin").status_code, 404)
+
+
 if __name__ == '__main__':
     unittest.main()
