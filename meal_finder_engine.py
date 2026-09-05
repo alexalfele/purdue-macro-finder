@@ -415,6 +415,16 @@ class MealFinder:
         if dietary_filters is None:
             dietary_filters = {}
 
+        # Forgiving, case-insensitive substring match so users can type
+        # "eggs" and exclude "Scrambled Eggs" without knowing the exact name.
+        excluded_terms = [
+            str(term).strip().lower() for term in exclusion_list if str(term).strip()
+        ]
+
+        def _is_excluded(item):
+            name = (item.get("name") or "").lower()
+            return any(term in name for term in excluded_terms)
+
         date_str = self.normalize_date(date_str)
         self.ensure_loaded(date_str)
 
@@ -444,7 +454,7 @@ class MealFinder:
         available_courts = {
             item["court"]
             for item in filtered
-            if item["name"] not in exclusion_list and item["meal_name"] in meal_periods_to_check
+            if not _is_excluded(item) and item["meal_name"] in meal_periods_to_check
         }
 
         if not available_courts:
@@ -462,7 +472,7 @@ class MealFinder:
                 item
                 for item in filtered
                 if item["court"] == court
-                and item["name"] not in exclusion_list
+                and not _is_excluded(item)
                 and item["meal_name"] in meal_periods_to_check
             ]
             solution, score, totals = self._run_optimization_for_court(

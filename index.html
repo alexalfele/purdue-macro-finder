@@ -61,7 +61,7 @@
         /* Masthead */
         .site-header { border-bottom: 3px double var(--gold-rule); }
         .site-header__inner {
-            max-width: 1100px;
+            max-width: 1280px;
             margin: 0 auto;
             padding: 1.4rem 1.5rem 1.2rem;
             display: flex;
@@ -78,12 +78,12 @@
         }
 
         /* Page */
-        .page { max-width: 1100px; margin: 0 auto; padding: 1.75rem 1.5rem 2.5rem; }
+        .page { max-width: 1280px; margin: 0 auto; padding: 1.75rem 1.5rem 2.5rem; }
         .page-intro { margin: 0 0 1.75rem; color: var(--ink-soft); max-width: 60ch; }
 
         .app-container { display: grid; grid-template-columns: 1fr; gap: 1.75rem; }
         @media (min-width: 960px) {
-            .app-container { grid-template-columns: 20rem 1fr; gap: 2.5rem; align-items: start; }
+            .app-container { grid-template-columns: 19rem 1fr; gap: 2.5rem; align-items: start; }
         }
 
         .controls-panel, .results-panel {
@@ -91,7 +91,7 @@
             border: 1px solid var(--rule-strong);
             padding: 1.4rem;
         }
-        .results-panel { min-height: 26rem; }
+        .results-panel { min-height: 44rem; padding: 1.9rem; }
 
         /* Tabs */
         .tabs {
@@ -314,7 +314,7 @@
         #plate-note h3 { font-size: 0.95rem; margin: 0 0 0.35rem; }
         #plate-note p { margin: 0; font-size: 0.92rem; color: var(--ink-soft); }
 
-        .chart-container { max-width: 15rem; margin: 0.5rem auto 0; }
+        .chart-container { max-width: 18rem; margin: 0.5rem auto 0; }
 
         #meal-plan-items { display: flex; flex-direction: column; }
         .item-card {
@@ -339,7 +339,7 @@
 
         /* Footer */
         .site-footer {
-            max-width: 1100px;
+            max-width: 1280px;
             margin: 0 auto;
             padding: 1.5rem;
             border-top: 1px solid var(--rule);
@@ -420,6 +420,20 @@
                                     <input type="checkbox" data-filter="No Gluten" aria-label="No gluten">
                                     No gluten
                                 </label>
+                            </div>
+                        </details>
+
+                        <details class="field-group">
+                            <summary>Exclude foods</summary>
+                            <div>
+                                <label for="exclusion-input">Foods to leave off the plate</label>
+                                <textarea id="exclusion-input" rows="3"
+                                    placeholder="One per line, e.g.&#10;eggs&#10;white rice"
+                                    aria-label="Foods to exclude from the meal, one per line"></textarea>
+                                <p class="muted-small" style="margin-top: 0.4rem;">
+                                    Any menu item whose name contains one of these lines is skipped.
+                                    Matching ignores capitalization.
+                                </p>
                             </div>
                         </details>
 
@@ -545,6 +559,7 @@
             const targetFat = document.getElementById('target-fat');
             const filterCheckboxes = document.querySelectorAll('.filters input[data-filter]');
             const mealPeriodCheckboxes = document.querySelectorAll('input[name="meal_period"]');
+            const exclusionInput = document.getElementById('exclusion-input');
 
             const todayLocal = () => {
                 const d = new Date();
@@ -714,11 +729,16 @@
                     if (cb.checked) selectedFilters[cb.dataset.filter] = true;
                 });
 
+                const exclusionList = (exclusionInput.value || '')
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(Boolean);
+
                 const payload = {
                     targets: { p: protein, c: carbs, f: fat },
                     meal_periods: selectedMeals,
                     dietary_filters: selectedFilters,
-                    exclusion_list: [],
+                    exclusion_list: exclusionList,
                     date: mealDate.value || todayLocal(),
                 };
 

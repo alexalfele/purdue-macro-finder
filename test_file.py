@@ -362,6 +362,66 @@ class TestFindMealEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
 
+class TestExclusionList(unittest.TestCase):
+    """find_best_meal must drop items named in the exclusion list, matching
+    case-insensitively on substrings."""
+
+    def setUp(self):
+        self.finder = MealFinder()
+        date_str = "2026-06-15"
+        self.date_str = date_str
+
+        def _item(name, p, c, f):
+            return {
+                "name": name, "court": "Testville", "meal_name": "Lunch",
+                "p": p, "c": c, "f": f, "serving_size": "Serving", "traits": [],
+            }
+
+        master = [
+            _item("Scrambled Eggs", 12, 2, 10),
+            _item("Grilled Chicken Breast", 30, 0, 4),
+            _item("White Rice", 4, 45, 1),
+            _item("Brown Rice", 5, 44, 2),
+            _item("Steamed Broccoli", 3, 6, 0),
+            _item("Snickerdoodle Cookie", 1, 18, 5),
+        ]
+        with self.finder.data_lock:
+            self.finder.menu_by_date[date_str] = {"master": master}
+        # Data is already in memory; skip the network load.
+        self.finder.ensure_loaded = lambda *a, **kw: None
+
+    def _plan_names(self, exclusion_list):
+        result = self.finder.find_best_meal(
+            {"p": 40, "c": 60, "f": 20},
+            ["Lunch"],
+            exclusion_list,
+            {},
+            date_str=self.date_str,
+        )
+        self.assertIsNotNone(result, "expected a meal plan")
+        return [i["name"] for i in result["plan"]]
+
+    def test_no_exclusions_can_use_any_item(self):
+        names = self._plan_names([])
+        self.assertTrue(names)
+
+    def test_exact_name_is_excluded(self):
+        names = self._plan_names(["White Rice"])
+        self.assertNotIn("White Rice", names)
+
+    def test_match_is_case_insensitive_and_substring(self):
+        names = self._plan_names(["rice"])
+        self.assertFalse(
+            [n for n in names if "rice" in n.lower()],
+            "both 'White Rice' and 'Brown Rice' should be gone",
+        )
+
+    def test_blank_entries_are_ignored(self):
+        # A blank string must not exclude everything.
+        names = self._plan_names(["   ", ""])
+        self.assertTrue(names)
+
+
 class TestSecurityHardening(unittest.TestCase):
     """The app must not serve source/secret files and must send safe headers."""
 
