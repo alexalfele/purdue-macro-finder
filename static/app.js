@@ -551,9 +551,13 @@
             }
             // The station says where in the dining court to find it, e.g. a
             // topping that lives at the "Salad Bar".
+            // Sauces, toppings, spreads and buns are listed under the food
+            // they go with: "Tzatziki Sauce: Firewall · with Chicken Shawarma".
+            if (item.goes_with) row.classList.add('item-addon');
             const detail = document.createElement('p');
             const size = servingLabel(item.serving_size);
-            detail.textContent = [item.station, size].filter(Boolean).join(' · ');
+            const pairing = item.goes_with ? `with ${item.goes_with}` : '';
+            detail.textContent = [item.station, size, pairing].filter(Boolean).join(' · ');
             info.append(name, detail);
             const allergens = ALLERGENS.filter((a) => (item.traits || []).includes(a));
             if (allergens.length) {

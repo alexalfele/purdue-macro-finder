@@ -458,6 +458,9 @@ fieldset.filters legend {
 
 .nutrition-extra { margin: 0.6rem 0 0; font-size: 0.85rem; color: var(--ink-mute); }
 
+/* An add-on (sauce, topping, spread, bun), indented under its food */
+.item-card.item-addon { padding-left: 1rem; box-shadow: inset 2px 0 0 var(--rule-strong); }
+
 /* Items: macros plus a "Not this" swap button */
 .item-side { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; }
 .item-info .item-contains { font-size: 0.78rem; color: var(--ink-soft); }

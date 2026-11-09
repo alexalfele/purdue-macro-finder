@@ -847,6 +847,114 @@ class TestPlateRules(unittest.TestCase):
         self.assertEqual(totals["sodium"], round(210.4 * servings))
 
 
+def _item(name, station, p, c, f):
+    return {"name": name, "station": station, "p": p, "c": c, "f": f, "cal": 4 * p + 4 * c + 9 * f}
+
+
+class TestPlateComposition(unittest.TestCase):
+    """Plates must be something a person would eat. Regression: the optimizer
+    used sauces and buns as macro filler, e.g. Marinara Sauce and Hot Honey
+    Sauce with nothing to put them on, or a hot dog bun with no hot dog."""
+
+    def test_roles_of_real_menu_names(self):
+        import meal_finder_engine as E
+        cases = {
+            ("Tzatziki Sauce", "Firewall"): E.CONDIMENT,
+            ("Hot Honey Sauce", "Big Bytes"): E.CONDIMENT,
+            ("Balsamic Vinaigrette Dressing", "Salad Bar"): E.CONDIMENT,
+            ("Shredded Cheddar Cheese", "Salad Bar"): E.CONDIMENT,
+            ("Salsa Verde", "La Fonda Station"): E.CONDIMENT,
+            ("Fresh Pico De Gallo", "SoHo International Market"): E.CONDIMENT,
+            ("Pancake Syrup", "BoilerQ"): E.SWEET_TOPPING,
+            ("Rainbow Sprinkles", "Sundae Bar"): E.SWEET_TOPPING,
+            ("Creamy Peanut Butter", "Deli Bar"): E.SPREAD,
+            ("Whipped Cream Cheese", "Bread and Condiments"): E.SPREAD,
+            ("GF Hot Dog Bun", "By Request"): E.VESSEL,
+            ('8" Flour Tortilla', "Halal"): E.VESSEL,
+            ("White Panini Bread", "Deli Bar"): E.VESSEL,
+            # Real foods that only sound like add-ons:
+            ("Applesauce", "Salad Stop"): E.FOOD,
+            ("Penne Pasta with Rudy's Bolognese Sauce", "Classic Flavors"): E.FOOD,
+            ("Grilled Pork Tenderloin w/Mushroom Sauce", "Big Bytes"): E.FOOD,
+            ("Cottage Cheese", "Salad Bar"): E.FOOD,
+            ("Grilled Cheese", "Classic Flavors"): E.FOOD,
+            ("Cinnamon Bun", "The Pastry Shop"): E.FOOD,
+            ("Apple Crumble", "Sugar Hill"): E.FOOD,
+            ("Tortilla Chips", "La Fonda Station"): E.FOOD,
+            ("Plain Bagel", "Bread and Condiments"): E.FOOD,
+            ("Tuscan Butter Shrimp", "Gluten Friendly"): E.FOOD,
+        }
+        for (name, station), role in cases.items():
+            self.assertEqual(E._food_role(name, station)[0], role, name)
+
+    def test_topping_stations(self):
+        import meal_finder_engine as E
+        self.assertEqual(E._food_role("Raisins", "Oatmeal and Pancake Toppers")[0], E.CONDIMENT)
+        # A veggie burger at "Burger Toppings" is still a meal.
+        self.assertEqual(E._food_role("Veggie Burger", "Burger Toppings", True)[0], E.FOOD)
+
+    def test_pairing_rules(self):
+        from meal_finder_engine import _make_plate_check
+        pool = [
+            _item("Chicken Shawarma", "Firewall", 26, 1, 4),      # 0
+            _item("Tzatziki Sauce", "Firewall", 2, 4, 4),         # 1
+            _item("Marinara Sauce", "Pasta Bar", 2, 8, 2),        # 2
+            _item("Hot Dog Bun", "BoilerQ", 3, 21, 2),            # 3
+            _item("Super Beef Hot Dog", "BoilerQ", 7, 2, 16),     # 4
+            _item("White Bread", "Deli Bar", 2, 15, 1),           # 5
+            _item("Creamy Peanut Butter", "Deli Bar", 4, 4, 8),   # 6
+            _item("Pancakes", "The Gallery", 6, 45, 8),           # 7
+            _item("Pancake Syrup", "The Gallery", 0, 8, 0),       # 8
+            _item("Ranch Dressing", "The Gallery", 0, 1, 7),      # 9
+            _item("Mayonnaise", "Deli Bar", 0, 0, 11),            # 10
+            _item("Hummus", "Firewall", 1, 3, 2),                 # 11
+        ]
+        _, ok = _make_plate_check(pool)
+        self.assertTrue(ok([0, 1]))            # sauce on the shawarma it's served with
+        self.assertFalse(ok([0, 2]))           # marinara with no pasta
+        self.assertFalse(ok([0, 3]))           # a bun with nothing in it
+        self.assertTrue(ok([4, 3]))            # hot dog in a bun
+        self.assertTrue(ok([5, 6]))            # peanut butter on bread
+        self.assertFalse(ok([5, 10]))          # bread and mayo is not a meal
+        self.assertTrue(ok([7, 8]))            # syrup on pancakes
+        self.assertFalse(ok([7, 9]))           # ranch on pancakes
+        self.assertFalse(ok([0, 1, 1]))        # one serving of a sauce
+        self.assertFalse(ok([0, 1, 11, 4, 3, 10]))  # at most MAX_ADDONS add-ons
+        self.assertFalse(ok([4, 3, 5]))        # one kind of bun or bread
+
+    def test_optimizer_never_strands_an_add_on(self):
+        # Orphan sauces are perfect macro filler here; the plate may use the
+        # grill's own teriyaki sauce but nothing from other stations.
+        pool = [
+            _item("Grilled Chicken", "Grill", 30, 0, 5),
+            _item("White Rice", "Grill", 4, 45, 1),
+            _item("Teriyaki Sauce", "Grill", 0, 12, 0),
+            _item("Hot Honey Sauce", "Big Bytes", 0, 15, 0),
+            _item("Ranch Dressing", "Salad Bar", 0, 1, 14),
+            _item("GF Hot Dog Bun", "By Request", 1, 14, 0),
+            _item("Steamed Broccoli", "Veggies", 3, 6, 0),
+            _item("Apple", "Fruit", 0, 25, 0),
+        ]
+        finder = MealFinder()
+        for seed in range(10):
+            plan, _, _ = finder._optimize_pool(pool, {"p": 40, "c": 60, "f": 20}, Config.WEIGHTS,
+                                               Config.PENALTIES, rng=random.Random(seed))
+            names = [i["name"] for i in plan]
+            for orphan in ("Hot Honey Sauce", "Ranch Dressing", "GF Hot Dog Bun"):
+                self.assertNotIn(orphan, names)
+            if "Teriyaki Sauce" in names:
+                sauce = names.index("Teriyaki Sauce")
+                self.assertEqual(plan[sauce]["goes_with"], "Grilled Chicken")
+                self.assertEqual(names[sauce - 1], "Grilled Chicken")  # listed under it
+
+    def test_bulk_container_rows_are_skipped(self):
+        finder = MealFinder()
+        sauce = _appearance("Bourbon Style Sauce", p=0, c=4243, f=0)
+        foods, _ = finder._parse_court("X", {"data": {"diningCourtByName": {"dailyMenu": {
+            "meals": [_meal("Dinner", [sauce, _appearance("Steak", p=30, c=0, f=12)])]}}}}, set())
+        self.assertEqual([f["name"] for f in foods], ["Steak"])
+
+
 class TestOptimizer(unittest.TestCase):
     """The optimizer should find the best plate, not merely a decent one."""
 

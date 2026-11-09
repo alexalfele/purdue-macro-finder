@@ -10,6 +10,7 @@ import os
 import logging
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 from config import Config
 
@@ -35,6 +36,133 @@ _FALLBACK_HOURS = [
 _MACRO_FACTS = {"Protein": "p", "Total Carbohydrate": "c", "Total fat": "f", "Calories": "cal"}
 # Reported for each plate but not optimized. Sodium is in mg, the rest in g.
 _EXTRA_FACTS = {"Dietary Fiber": "fiber", "Sugar": "sugar", "Saturated fat": "sat_fat", "Sodium": "sodium"}
+
+# --- plate composition ---
+# The optimizer only sees grams, so it happily used sauces, dressings and
+# buns as macro filler: marinara with no pasta, a hot dog bun with no hot
+# dog. Foods therefore get a role, and add-ons must come with something from
+# the same station to go on or in (see _make_plate_check).
+FOOD, CONDIMENT, SWEET_TOPPING, SPREAD, VESSEL = range(5)
+
+_ADDON_PATTERNS = [
+    # A dish that comes with its sauce ("Pork w/Mushroom Sauce") is food, as
+    # are pastries that only sound like add-ons.
+    (FOOD, re.compile(r"\b(with|w/)|\b(cinnamon|honey|sticky|sweet) buns?$", re.I)),
+    # Spreads go on bread, bagels, pancakes or fruit.
+    (SPREAD, re.compile(
+        r"\b(peanut butter|almond butter|nutella|jelly|jam|preserves|cream cheese|butter"
+        r"|margarine|honey)$", re.I)),
+    (SWEET_TOPPING, re.compile(
+        r"\b(syrup|sprinkles|topping|chocolate chips|glaze|icing|frosting|whipped cream"
+        r"|caramel|marshmallows?|powdered sugar|brown sugar|cinnamon sugar)$", re.I)),
+    (CONDIMENT, re.compile(
+        r"\b(sauce|dressing|gravy|salsa|dip|ketchup|mustard|mayonnaise|mayo|relish|aioli|pesto"
+        r"|vinaigrette|ranch|seasoning|oil|croutons?|bits|sour cream|guacamole|tzatziki|hummus|spread"
+        r"|chutney|pickles?|jalape[nñ]os?|olives|pepperoncini|cilantro|onions?|minced garlic"
+        r"|pico de gallo|sriracha|horseradish|sauerkraut|kimchi|furikake"
+        r"|(sausage|bacon|beef|chorizo|turkey|feta|bleu cheese|blue cheese) crumbles?)$"
+        r"|^salsa (roja|verde|fresca|negra|cruda|ranchera)$"
+        # Sliced, shredded or named cheeses are toppings; cottage, grilled
+        # or mac and cheese are not.
+        r"|\b(shredded|grated|crumbled|sliced|american|swiss|provolone|cheddar|pepper jack"
+        r"|cojack|mozzarella|feta|parmesan|mont\.? jack|monterey jack|colby|muenster|gouda"
+        r"|havarti|bleu|blue)\b.*\bcheese( slices?| blend)?$", re.I)),
+    (VESSEL, re.compile(
+        r"\b(buns?|tortillas?|taco shells?|tostada shells?)$"
+        r"|\b(white|wheat|multi ?grain|whole wheat|rye|sourdough|panini|pita) bread$", re.I)),
+]
+# Stations of add-ons ("Sandwich Toppers", "Oatmeal and Pancake Toppers").
+# Low-protein items there are toppings; a veggie burger there is still a meal.
+_ADDON_STATION = re.compile(r"topper|topping|sauces", re.I)
+_ADDON_STATION_MAX_PROTEIN = 5.0
+_SWEET = re.compile(
+    r"yogurt|fruit|cake|cookie|\bpie\b|muffin|pancake|waffle|french toast|oatmeal|ice cream"
+    r"|gelato|sherbet|gelatin|pudding|crisp|cobbler|brownie|donut|doughnut|cinnamon|danish"
+    r"|scone|parfait|granola|cereal|banana|apple|berr|melon|grape|orange|pineapple|peach", re.I)
+_BREADY = re.compile(
+    r"bagel|pizza|bread|roll\b|muffin|biscuit|croissant|toast|flatbread|focaccia|pita|naan", re.I)
+
+
+@lru_cache(maxsize=16384)
+def _food_role(name, station, protein_rich=False):
+    """(role, sweet, bready) for a food. Sweet foods take sweet toppings;
+    savory, non-bread foods can fill a bun or tortilla."""
+    role = FOOD
+    for candidate, pattern in _ADDON_PATTERNS:
+        if pattern.search(name):
+            role = candidate
+            break
+    if role == FOOD and not protein_rich and _ADDON_STATION.search(station or ""):
+        role = CONDIMENT
+    return role, bool(_SWEET.search(name)), bool(_BREADY.search(name))
+
+
+def _make_plate_check(items):
+    """Returns (special, ok) for a pool, or (None, None) if it has no add-ons.
+
+    special[i] is True for add-ons. ok(plate) says whether a plate (a list of
+    pool indices, one per serving) is something a person would eat:
+      - a condiment needs a savory food or a bun/bread from its station;
+      - a sweet topping needs a sweet food from its station;
+      - a spread needs bread, a bagel, pancakes, fruit, etc., or a bun/bread;
+      - a bun, tortilla or sandwich bread needs a savory filling or a spread;
+      - at most MAX_ADDONS condiments/toppings/spreads, one serving each, and
+        at most one kind of bun/bread.
+    Adding a plain food never makes a valid plate invalid, which lets the
+    search skip the check for most moves.
+    """
+    meta = [_food_role(it.get("name") or "", it.get("station") or "",
+                       float(it.get("p") or 0) >= _ADDON_STATION_MAX_PROTEIN) for it in items]
+    special = [role != FOOD for role, _, _ in meta]
+    if not any(special):
+        return None, None
+    role = [m[0] for m in meta]
+    sweet = [m[1] for m in meta]
+    bready = [m[2] for m in meta]
+    station = [it.get("station") or "" for it in items]
+    max_addons = Config.MAX_ADDONS
+
+    def ok(plate):
+        savory, sweet_at, base, filling = set(), set(), set(), set()
+        vessel_at, spread_at = set(), set()
+        addons, vessel = [], None
+        for i in plate:
+            r, s = role[i], station[i]
+            if r == FOOD:
+                if sweet[i]:
+                    sweet_at.add(s)
+                else:
+                    savory.add(s)
+                    if not bready[i]:
+                        filling.add(s)
+                if sweet[i] or bready[i]:
+                    base.add(s)
+            elif r == VESSEL:
+                if vessel is not None and vessel != i:
+                    return False
+                vessel = i
+                vessel_at.add(s)
+            else:
+                if i in addons:
+                    return False  # one serving of any add-on
+                addons.append(i)
+                if r == SPREAD:
+                    spread_at.add(s)
+        if len(addons) > max_addons:
+            return False
+        for i in addons:
+            r, s = role[i], station[i]
+            if r == CONDIMENT and s not in savory and s not in vessel_at:
+                return False
+            if r == SWEET_TOPPING and s not in sweet_at:
+                return False
+            if r == SPREAD and s not in base and s not in vessel_at:
+                return False
+        if vessel is not None and station[vessel] not in filling and station[vessel] not in spread_at:
+            return False
+        return True
+
+    return special, ok
 
 
 def _format_clock(hour, minute=0):
@@ -313,6 +441,8 @@ class MealFinder:
 
         if food["p"] + food["c"] + food["f"] <= 0:
             return None
+        if max(food["p"], food["c"], food["f"]) > Config.MAX_SERVING_GRAMS:
+            return None  # a bulk container, not something one person eats
 
         food.update({
             "name": (appearance.get("displayName") or "").strip() or "Unnamed item",
@@ -578,6 +708,10 @@ class MealFinder:
         F = [float(it.get("f", 0)) for it in items]
         cal = [float(it.get("cal", 0) or 0) for it in items]
         score = self._make_scorer(targets, weights, penalties)
+        # Plate-composition rules (sauces need something to go on, buns need
+        # a filling). `ok` is None when the pool has no add-ons at all.
+        special, ok = _make_plate_check(items)
+        rules = (special, ok)
 
         # The greedy plate is built around its first picks, often one large
         # item (say a 32 g-protein entree). A better plate may need that item
@@ -585,29 +719,34 @@ class MealFinder:
         # swap/add/remove can do, so also start from greedy plates that are
         # forbidden each early pick. Later passes may still bring it back.
         restarts = max(1, Config.RESTARTS)
-        greedy = self._greedy_seed(n, P, C, F, score)
+        greedy = self._greedy_seed(n, P, C, F, score, rules=rules)
         seeds = [greedy]
         for anchor in list(dict.fromkeys(greedy))[:restarts - 1]:
-            seed = self._greedy_seed(n, P, C, F, score, banned={anchor})
+            seed = self._greedy_seed(n, P, C, F, score, banned={anchor}, rules=rules)
             if len(seed) >= Config.MIN_ITEMS:  # tiny pools may run out of items
                 seeds.append(seed)
-        while len(seeds) < restarts:
-            seeds.append(rng.sample(range(n), min(Config.INITIAL_ITEMS, n)))
+        plain = [i for i in range(n) if not (special and special[i])]
+        while len(seeds) < restarts and plain:
+            seeds.append(rng.sample(plain, min(Config.INITIAL_ITEMS, len(plain))))
 
         protein_window = self._make_protein_window(targets, weights, penalties)
         best_plate, best_score = None, float("inf")
         for plate in seeds:
-            plate = self._anneal(plate, n, P, C, F, score, rng)
-            plate, plate_score = self._deep_polish(plate, n, P, C, F, score, protein_window)
-            if plate_score < best_score:
+            plate = self._anneal(plate, n, P, C, F, score, rng, rules=rules)
+            plate, plate_score = self._deep_polish(plate, n, P, C, F, score, protein_window, rules=rules)
+            if plate_score < best_score and len(plate) >= Config.MIN_ITEMS and (ok is None or ok(plate)):
                 best_plate, best_score = plate, plate_score
+        if best_plate is None:
+            return None, float("inf"), {}
 
         servings = {}
         for i in best_plate:
             servings[i] = servings.get(i, 0) + 1
+        order = self._serving_order(servings, items, P, special)
         # Copies, so the shared menu snapshot is never mutated per request.
-        plan = [dict(items[i], servings=count) for i, count in servings.items()]
-        plan.sort(key=lambda it: -it.get("p", 0) * it["servings"])
+        plan = [dict(items[i], servings=servings[i], **({"goes_with": items[partner]["name"]}
+                                                         if partner is not None else {}))
+                for i, partner in order]
         totals = {
             "p": round(sum(P[i] for i in best_plate), 1),
             "c": round(sum(C[i] for i in best_plate), 1),
@@ -620,9 +759,52 @@ class MealFinder:
         return plan, best_score, totals
 
     @staticmethod
-    def _greedy_seed(n, P, C, F, score, banned=frozenset()):
+    def _serving_order(servings, items, P, special):
+        """Plate order for display: foods by protein, each add-on listed
+        right after the food (or bun) it goes with.
+
+        Returns [(index, partner_index_or_None)].
+        """
+        foods = sorted((i for i in servings if not (special and special[i])),
+                       key=lambda i: -P[i] * servings[i])
+        if not special:
+            return [(i, None) for i in foods]
+        addons = [i for i in servings if special[i]]
+        station = lambda i: items[i].get("station") or ""
+        vessels = [i for i in addons if _food_role(items[i].get("name") or "", station(i))[0] == VESSEL]
+        # Each add-on's partner: the most substantial food from its station,
+        # else (for a sauce or spread) the bun or bread there.
+        partner, children = {}, {}
+        for i in addons:
+            same = [j for j in foods if station(j) == station(i)]
+            if i not in vessels:
+                same += [v for v in vessels if station(v) == station(i)]
+            partner[i] = same[0] if same else None
+            children.setdefault(partner[i], []).append(i)
+
+        order, placed = [], set()
+
+        def visit(i, parent):
+            if i not in placed:
+                placed.add(i)
+                order.append((i, parent))
+                for child in children.get(i, []):
+                    visit(child, i)
+
+        for i in foods:
+            visit(i, None)
+        for i in addons:  # e.g. bread holding peanut butter, then the rest
+            if partner[i] is None:
+                visit(i, None)
+        for i in addons:
+            visit(i, partner[i])
+        return order
+
+    @staticmethod
+    def _greedy_seed(n, P, C, F, score, banned=frozenset(), rules=(None, None)):
         """Add whichever serving improves the score most until nothing helps."""
         cap = Config.MAX_SERVINGS
+        special, ok = rules
         plate, counts = [], [0] * n
         tp = tc = tf = 0.0
         current = float("inf")
@@ -633,6 +815,9 @@ class MealFinder:
                     continue
                 s = score(tp + P[j], tc + C[j], tf + F[j])
                 if s < best_s:
+                    # Adding a plain food never breaks the composition rules.
+                    if ok is not None and special[j] and not ok(plate + [j]):
+                        continue
                     best_j, best_s = j, s
             if best_j is None or (len(plate) >= Config.MIN_ITEMS and best_s >= current):
                 break
@@ -643,13 +828,19 @@ class MealFinder:
         return plate
 
     @staticmethod
-    def _anneal(plate, n, P, C, F, score, rng):
-        """Simulated annealing over swap/add/remove moves. Returns the best plate seen."""
+    def _anneal(plate, n, P, C, F, score, rng, rules=(None, None)):
+        """Simulated annealing over swap/add/remove moves. Returns the best plate seen.
+
+        With composition rules, a move is checked only when it adds an add-on
+        or the plate already holds one; other moves can't break the rules.
+        """
         lo, hi, cap = Config.MIN_ITEMS, Config.MAX_ITEMS, Config.MAX_SERVINGS
+        special, ok = rules
         plate = list(plate)
         counts = [0] * n
         for i in plate:
             counts[i] += 1
+        n_special = sum(1 for i in plate if special[i]) if ok else 0
         tp, tc, tf = sum(P[i] for i in plate), sum(C[i] for i in plate), sum(F[i] for i in plate)
         current = score(tp, tc, tf)
         best_plate, best = list(plate), current
@@ -665,34 +856,45 @@ class MealFinder:
         for _ in range(iterations):
             move = rand()
             if move < 0.6:  # swap one serving for a different food
-                k, j = randrange(len(plate)), randrange(n)
-                i = plate[k]
-                if j != i and counts[j] < cap:
-                    np_, nc, nf = tp - P[i] + P[j], tc - C[i] + C[j], tf - F[i] + F[j]
-                    s = score(np_, nc, nf)
-                    if s <= current or rand() < exp((current - s) / temp):
-                        plate[k] = j
-                        counts[i] -= 1
-                        counts[j] += 1
-                        tp, tc, tf, current = np_, nc, nf, s
+                if plate:
+                    k, j = randrange(len(plate)), randrange(n)
+                    i = plate[k]
+                    if j != i and counts[j] < cap:
+                        np_, nc, nf = tp - P[i] + P[j], tc - C[i] + C[j], tf - F[i] + F[j]
+                        s = score(np_, nc, nf)
+                        if ((s <= current or rand() < exp((current - s) / temp))
+                                and (not ok or not (n_special or special[j])
+                                     or ok(plate[:k] + [j] + plate[k + 1:]))):
+                            plate[k] = j
+                            counts[i] -= 1
+                            counts[j] += 1
+                            if ok:
+                                n_special += special[j] - special[i]
+                            tp, tc, tf, current = np_, nc, nf, s
             elif move < 0.8:  # add a serving
                 if len(plate) < hi:
                     j = randrange(n)
                     if counts[j] < cap:
                         np_, nc, nf = tp + P[j], tc + C[j], tf + F[j]
                         s = score(np_, nc, nf)
-                        if s <= current or rand() < exp((current - s) / temp):
+                        if ((s <= current or rand() < exp((current - s) / temp))
+                                and (not ok or not special[j] or ok(plate + [j]))):
                             plate.append(j)
                             counts[j] += 1
+                            if ok:
+                                n_special += special[j]
                             tp, tc, tf, current = np_, nc, nf, s
             elif len(plate) > lo:  # remove a serving
                 k = randrange(len(plate))
                 i = plate[k]
                 np_, nc, nf = tp - P[i], tc - C[i], tf - F[i]
                 s = score(np_, nc, nf)
-                if s <= current or rand() < exp((current - s) / temp):
+                if ((s <= current or rand() < exp((current - s) / temp))
+                        and (not ok or not n_special or ok(plate[:k] + plate[k + 1:]))):
                     plate.pop(k)
                     counts[i] -= 1
+                    if ok:
+                        n_special -= special[i]
                     tp, tc, tf, current = np_, nc, nf, s
 
             if current < best:
@@ -702,13 +904,14 @@ class MealFinder:
         return best_plate
 
     @staticmethod
-    def _polish(plate, n, P, C, F, score):
+    def _polish(plate, n, P, C, F, score, rules=(None, None)):
         """Best-improvement local search until no single-serving change helps.
 
         Guarantees the returned plate is a local optimum, which annealing alone
-        does not.
+        does not. Moves that break the composition rules are skipped.
         """
         lo, hi, cap = Config.MIN_ITEMS, Config.MAX_ITEMS, Config.MAX_SERVINGS
+        special, ok = rules
         plate = list(plate)
         counts = [0] * n
         for i in plate:
@@ -716,19 +919,36 @@ class MealFinder:
         tp, tc, tf = sum(P[i] for i in plate), sum(C[i] for i in plate), sum(F[i] for i in plate)
         current = score(tp, tc, tf)
 
+        def allowed(remove, add):
+            """Whether removing one serving of `remove` and adding `add`
+            (either may be None) keeps the plate valid. Checked only for
+            improving moves, and only when an add-on is involved."""
+            if ok is None:
+                return True
+            add_special = add is not None and special[add]
+            if not add_special and (remove is None or not has_special):
+                return True  # adding a plain food, or a plate with no add-ons
+            trial = list(plate)
+            if remove is not None:
+                trial.remove(remove)
+            if add is not None:
+                trial.append(add)
+            return ok(trial)
+
         while True:
             best_move, best_s = None, current - 1e-9
+            has_special = ok is not None and any(special[i] for i in plate)
             addable = [j for j in range(n) if counts[j] < cap]
             distinct = list(dict.fromkeys(plate))  # two servings of a food are interchangeable
             if len(plate) > lo:
                 for i in distinct:
                     s = score(tp - P[i], tc - C[i], tf - F[i])
-                    if s < best_s:
+                    if s < best_s and allowed(i, None):
                         best_move, best_s = ("remove", i, None), s
             if len(plate) < hi:
                 for j in addable:
                     s = score(tp + P[j], tc + C[j], tf + F[j])
-                    if s < best_s:
+                    if s < best_s and allowed(None, j):
                         best_move, best_s = ("add", None, j), s
             for i in distinct:
                 bp, bc, bf = tp - P[i], tc - C[i], tf - F[i]
@@ -736,7 +956,7 @@ class MealFinder:
                     if j == i:
                         continue
                     s = score(bp + P[j], bc + C[j], bf + F[j])
-                    if s < best_s:
+                    if s < best_s and allowed(i, j):
                         best_move, best_s = ("swap", i, j), s
             if best_move is None:
                 break
@@ -775,7 +995,7 @@ class MealFinder:
         return window
 
     @staticmethod
-    def _deep_polish(plate, n, P, C, F, score, protein_window):
+    def _deep_polish(plate, n, P, C, F, score, protein_window, rules=(None, None)):
         """Local search that may change up to two servings at once.
 
         Single swap/add/remove moves get stuck when the plate is built around
@@ -783,14 +1003,30 @@ class MealFinder:
         smaller items added together. After single moves converge, this tries
         every combination of removing 0-2 servings and adding 1-2 servings
         (including two servings of one food), applies the best improvement,
-        and repeats until nothing helps.
+        and repeats until nothing helps. Adding two at once is also how a
+        bun and its filling, or bread and peanut butter, arrive together.
         """
         lo_items, hi_items, cap = Config.MIN_ITEMS, Config.MAX_ITEMS, Config.MAX_SERVINGS
+        special, ok = rules
         order = sorted(range(n), key=P.__getitem__)
         sorted_p = [P[i] for i in order]
-        plate, current = MealFinder._polish(plate, n, P, C, F, score)
+        plate, current = MealFinder._polish(plate, n, P, C, F, score, rules)
+
+        def allowed(rem, add):
+            """Composition check for an improving move; skipped when it can't
+            matter (no add-on on the plate or among the additions)."""
+            if ok is None:
+                return True
+            if not any(special[j] for j in add) and (not rem or not has_special):
+                return True  # only plain foods added, or no add-ons in play
+            trial = list(plate)
+            for i in rem:
+                trial.remove(i)
+            trial.extend(add)
+            return ok(trial)
 
         while True:
+            has_special = ok is not None and any(special[i] for i in plate)
             counts = [0] * n
             for i in plate:
                 counts[i] += 1
@@ -835,7 +1071,7 @@ class MealFinder:
                             elif counts[b] >= cap:
                                 continue
                             s = score(rp + pa + sorted_p[ib], rc + ca + C[b], rf + fa + F[b])
-                            if s < best_s:
+                            if s < best_s and allowed(rem, (a, b)):
                                 best_s, best_move = s, (rem, (a, b))
 
                 if len(rem) == 2:
@@ -844,12 +1080,12 @@ class MealFinder:
                         for j in range(n):
                             if counts[j] < cap:
                                 s = score(rp + P[j], rc + C[j], rf + F[j])
-                                if s < best_s:
+                                if s < best_s and allowed(rem, (j,)):
                                     best_s, best_move = s, (rem, (j,))
                     # Drop two servings.
                     if size >= lo_items:
                         s = score(rp, rc, rf)
-                        if s < best_s:
+                        if s < best_s and allowed(rem, ()):
                             best_s, best_move = s, (rem, ())
 
                 for i in rem:
@@ -863,7 +1099,7 @@ class MealFinder:
             for i in rem:
                 plate.remove(i)
             plate.extend(add)
-            plate, current = MealFinder._polish(plate, n, P, C, F, score)
+            plate, current = MealFinder._polish(plate, n, P, C, F, score, rules)
 
     @staticmethod
     def _passes_filters(item, dietary_filters):

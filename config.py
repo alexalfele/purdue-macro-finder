@@ -34,6 +34,13 @@ class Config:
     # spices, peppers) can't meaningfully change a plate's macros; offering
     # them only fills plates with noise like "Arugula: 0 g / 1 g / 0 g".
     MIN_ITEM_MACROS = 2.0
+    # Sauces, dressings, toppings and spreads per plate (one serving each).
+    # Each also needs something from its station to go on; see
+    # meal_finder_engine._make_plate_check.
+    MAX_ADDONS = 2
+    # A "serving" bigger than this many grams of any macro is a bulk container
+    # in Purdue's data ("Bourbon Style Sauce, 4 x .5 Gal": 4,243 g carbs).
+    MAX_SERVING_GRAMS = 150
 
     # API settings
     API_TIMEOUT = 10
