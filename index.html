@@ -6,7 +6,11 @@
     <meta name="description" content="Build a Purdue dining hall meal that matches your protein, carb, and fat targets.">
     <title>Purdue Macro Finder</title>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Pinned version with Subresource Integrity: an unpinned URL silently
+         picks up new major releases and would run any file the CDN serves. -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.6.1/dist/chart.umd.min.js"
+            integrity="sha384-Emf5ZVIUiarAdhkgtqK+5/Z5qIvM6QoVrS+qAVtfyZVuD5lIHrac0me485+Antp0"
+            crossorigin="anonymous"></script>
 
     <style>
         :root {
@@ -195,6 +199,9 @@
         select:focus, textarea:focus { outline: none; border-color: var(--ink); }
 
         .macro-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+        /* Labels can wrap in the narrow sidebar ("Protein (g)"); keep the
+           three inputs on one baseline regardless. */
+        .macro-grid > div { display: flex; flex-direction: column; justify-content: flex-end; }
         @media (max-width: 520px) { .macro-grid { grid-template-columns: 1fr; } }
 
         .filters label {
@@ -293,10 +300,33 @@
 
         #result-header {
             font-size: 1.4rem;
-            margin: 0 0 1.2rem;
+            margin: 0 0 0.5rem;
             padding-bottom: 0.6rem;
             border-bottom: 2px solid var(--ink);
         }
+
+        .result-where { margin: 0 0 1.2rem; font-size: 1rem; font-weight: 600; color: var(--ink); }
+        .result-where .hours { font-weight: 400; color: var(--ink-soft); }
+
+        .totals-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+        .totals-table th, .totals-table td { padding: 0.45rem 0.5rem; text-align: right; border-bottom: 1px solid var(--rule); }
+        .totals-table th:first-child, .totals-table td:first-child { text-align: left; padding-left: 0; }
+        .totals-table thead th {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--ink-mute);
+        }
+        .totals-table tbody th { font-weight: 600; font-size: 0.9rem; }
+        .totals-table tr.target-row th, .totals-table tr.target-row td { color: var(--ink-mute); }
+
+        .visually-hidden {
+            position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+            overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+        }
+
+        .servings { font-weight: 600; color: var(--gold); margin-left: 0.35rem; white-space: nowrap; }
 
         .section { margin-bottom: 1.6rem; }
         .section > h3 {
@@ -495,20 +525,36 @@
 
                 <div id="results-content" class="hidden">
                     <h2 id="result-header">Your meal</h2>
+                    <p id="result-where" class="result-where"></p>
+
+                    <div id="totals-section" class="section plate-section">
+                        <table class="totals-table" aria-label="Plate totals compared with your targets">
+                            <thead>
+                                <tr>
+                                    <th scope="col"><span class="visually-hidden">Row</span></th>
+                                    <th scope="col">Protein</th>
+                                    <th scope="col">Carbs</th>
+                                    <th scope="col">Fat</th>
+                                    <th scope="col">Calories</th>
+                                </tr>
+                            </thead>
+                            <tbody id="totals-body"></tbody>
+                        </table>
+                    </div>
 
                     <div id="plate-note" class="section hidden">
                         <h3>Note</h3>
                         <p id="plate-note-text"></p>
                     </div>
 
-                    <div class="section">
+                    <div class="section plate-section">
                         <h3>Macro breakdown</h3>
                         <div class="chart-container">
                             <canvas id="macro-chart" aria-label="Macro breakdown chart"></canvas>
                         </div>
                     </div>
 
-                    <div class="section">
+                    <div class="section plate-section">
                         <h3>Items</h3>
                         <div id="meal-plan-items" role="list"></div>
                     </div>
@@ -582,6 +628,8 @@
             const resultsContent = document.getElementById('results-content');
 
             const resultHeader = document.getElementById('result-header');
+            const resultWhere = document.getElementById('result-where');
+            const totalsBody = document.getElementById('totals-body');
             const plateNote = document.getElementById('plate-note');
             const plateNoteText = document.getElementById('plate-note-text');
             const chartCanvas = document.getElementById('macro-chart').getContext('2d');
@@ -622,8 +670,13 @@
                 });
             }
 
-            function validateMacroInput(value, macroName) {
-                const num = parseInt(value) || 0;
+            // Keeps decimals ("40.5"); blank or invalid input counts as 0.
+            function readGrams(input) {
+                const num = parseFloat(input.value);
+                return Number.isFinite(num) ? num : 0;
+            }
+
+            function validateMacroInput(num, macroName) {
                 if (num < 0) {
                     return { valid: false, message: `${macroName} cannot be negative.` };
                 }
@@ -636,9 +689,9 @@
             // --- 5. INPUT VALIDATION ---
             const validateInputs = debounce(() => {
                 if (activeTab !== 'manual') return;
-                const protein = parseInt(targetProtein.value) || 0;
-                const carbs = parseInt(targetCarbs.value) || 0;
-                const fat = parseInt(targetFat.value) || 0;
+                const protein = readGrams(targetProtein);
+                const carbs = readGrams(targetCarbs);
+                const fat = readGrams(targetFat);
 
                 if (protein > 100) {
                     statusLabel.textContent = 'That is a high protein target.';
@@ -693,26 +746,39 @@
             });
 
             document.addEventListener('keydown', (e) => {
-                const tag = document.activeElement.tagName;
-                if (e.key === 'Enter' && !generateButton.disabled &&
-                    tag !== 'TEXTAREA' && tag !== 'INPUT') {
+                const el = document.activeElement;
+                const tag = el ? el.tagName : '';
+                const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+                // Buttons, links and <summary> already act on Enter; firing a
+                // search too (e.g. Enter on the "Right now" tab) ran both.
+                const handlesEnter = inField || tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY';
+                const inTarget = tag === 'INPUT' && (el.type === 'number' || el.type === 'date');
+
+                if (e.key === 'Enter' && !generateButton.disabled && (inTarget || !handlesEnter)) {
+                    e.preventDefault();
                     generateButton.click();
                 }
-                if (e.key === 'Escape') {
+                // Escape used to wipe every input even while typing in one.
+                if (e.key === 'Escape' && !inField) {
                     resetButton.click();
                 }
             });
 
             // --- 7. API CALLS ---
             async function handleManualSearch() {
-                const protein = parseInt(targetProtein.value) || 0;
-                const carbs = parseInt(targetCarbs.value) || 0;
-                const fat = parseInt(targetFat.value) || 0;
+                const protein = readGrams(targetProtein);
+                const carbs = readGrams(targetCarbs);
+                const fat = readGrams(targetFat);
 
-                const proteinValidation = validateMacroInput(protein, 'Protein');
-                if (!proteinValidation.valid) {
-                    showPlaceholder(proteinValidation.message);
-                    return;
+                // Only protein used to be checked here; bad carbs or fat went
+                // to the server and came back as "Macro c (600.0) is out of range".
+                for (const [value, name] of [[protein, 'Protein'], [carbs, 'Carbs'], [fat, 'Fat']]) {
+                    const check = validateMacroInput(value, name);
+                    if (!check.valid) {
+                        showPlaceholder(check.message);
+                        statusLabel.style.color = COLOR_ERROR;
+                        return;
+                    }
                 }
 
                 const selectedMeals = [];
@@ -794,11 +860,16 @@
                     statusLabel.textContent = data.next_meal_hint || 'Nothing is being served right now.';
                     statusLabel.style.color = COLOR_WARN;
                     resultHeader.textContent = 'Nothing on the line right now';
+                    resultWhere.textContent = '';
                     plateNote.classList.remove('hidden');
                     plateNoteText.textContent =
                         data.next_meal_hint ||
                         'No dining court is currently serving. Check back during a meal period.';
+                    // No plate: hide the totals, chart and item sections rather
+                    // than showing empty headings or the previous plate's numbers.
+                    setPlateSectionsVisible(false);
                     mealPlanItems.innerHTML = '';
+                    totalsBody.innerHTML = '';
                     if (macroChart) { macroChart.destroy(); macroChart = null; }
                     resultsPlaceholder.classList.add('hidden');
                     loadingSpinner.classList.add('hidden');
@@ -811,6 +882,7 @@
                 const result = {
                     court: data.plate.court,
                     meal_name: data.plate.meal_name,
+                    hours: data.plate.hours,
                     plan: data.plate.plan,
                     totals: data.plate.totals,
                     date: data.date,
@@ -929,12 +1001,56 @@
                 statusLabel.style.color = COLOR_ERROR;
             }
 
+            // "Earhart · Dinner · 5 to 9 pm": where and when to go eat it.
+            function renderWhere(result) {
+                resultWhere.textContent = [result.court, result.meal_name].filter(Boolean).join(' · ');
+                if (result.hours && result.hours.label) {
+                    const hours = document.createElement('span');
+                    hours.className = 'hours';
+                    hours.textContent = ` · ${result.hours.label}`;
+                    resultWhere.appendChild(hours);
+                }
+            }
+
+            function renderTotals(totals, targets) {
+                totalsBody.innerHTML = '';
+                const grams = (v) => `${Math.round(v || 0)} g`;
+                const addRow = (label, m, calories, className) => {
+                    const tr = document.createElement('tr');
+                    if (className) tr.className = className;
+                    const th = document.createElement('th');
+                    th.scope = 'row';
+                    th.textContent = label;
+                    tr.appendChild(th);
+                    [grams(m.p), grams(m.c), grams(m.f), calories].forEach(value => {
+                        const td = document.createElement('td');
+                        td.textContent = value;
+                        tr.appendChild(td);
+                    });
+                    totalsBody.appendChild(tr);
+                };
+                // Plate calories come from Purdue's labels; a target has none,
+                // so estimate it at 4/4/9 kcal per gram.
+                const estimate = (m) => Math.round(4 * (m.p || 0) + 4 * (m.c || 0) + 9 * (m.f || 0));
+                addRow('This plate', totals, String(totals.cal != null ? Math.round(totals.cal) : estimate(totals)));
+                if (targets) addRow('Your target', targets, `~${estimate(targets)}`, 'target-row');
+            }
+
+            function setPlateSectionsVisible(visible) {
+                document.querySelectorAll('.plate-section').forEach(el => {
+                    el.classList.toggle('hidden', !visible);
+                });
+            }
+
             function displayResult(result, noteText) {
-                statusLabel.textContent = `Found a meal at ${result.court}.`;
+                setPlateSectionsVisible(true);
+                statusLabel.textContent = `Found a plate at ${result.court}.`;
                 statusLabel.style.color = COLOR_OK;
 
                 const dateLabel = result.date ? formatDateLabel(result.date) : '';
                 resultHeader.textContent = dateLabel ? `Your meal for ${dateLabel}` : 'Your meal';
+                renderWhere(result);
+                renderTotals(result.totals, result.targets);
 
                 if (noteText) {
                     plateNoteText.textContent = noteText;
@@ -947,6 +1063,7 @@
 
                 mealPlanItems.innerHTML = '';
                 result.plan.forEach(item => {
+                    const servings = item.servings || 1;
                     const card = document.createElement('div');
                     card.className = 'item-card';
                     card.setAttribute('role', 'listitem');
@@ -955,15 +1072,27 @@
                     info.className = 'item-info';
                     const h4 = document.createElement('h4');
                     h4.textContent = item.name || 'Unnamed item';
-                    const size = document.createElement('p');
-                    size.textContent = item.serving_size || '';
-                    info.append(h4, size);
+                    if (servings > 1) {
+                        const badge = document.createElement('span');
+                        badge.className = 'servings';
+                        badge.textContent = `× ${servings}`;
+                        badge.setAttribute('aria-label', `${servings} servings`);
+                        h4.appendChild(badge);
+                    }
+                    // Station tells you where in the dining court to find it,
+                    // e.g. a topping that lives at the "Salad Bar".
+                    const detail = document.createElement('p');
+                    const size = item.serving_size
+                        ? (servings > 1 ? `${item.serving_size} each` : item.serving_size)
+                        : '';
+                    detail.textContent = [item.station, size].filter(Boolean).join(' · ');
+                    info.append(h4, detail);
 
                     const macros = document.createElement('div');
                     macros.className = 'item-macros';
                     [['p', 'P'], ['c', 'C'], ['f', 'F']].forEach(([key, letter]) => {
                         const span = document.createElement('span');
-                        span.textContent = `${letter} ${Math.round(item[key] || 0)} g`;
+                        span.textContent = `${letter} ${Math.round((item[key] || 0) * servings)} g`;
                         macros.appendChild(span);
                     });
 
