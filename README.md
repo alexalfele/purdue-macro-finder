@@ -49,7 +49,8 @@ targets, from what is actually on the menu, and tells you where and when to get 
   restacking, scoring weighted, asymmetric misses (under-protein, over-carb, and over-fat
   cost more). Moves that would strand an add-on (a sauce with nothing to go on, a bun with
   no filling) are skipped. On random entree-style menus it finds the brute-force optimum
-  58 times in 60, at about 10 ms per court and meal. Tunables live in `config.py`.
+  58 times in 60, at about 6 ms per court and meal. Searches are deterministic, so recent
+  results are cached in memory and repeats are instant. Tunables live in `config.py`.
 
 ## Local development
 

@@ -814,6 +814,20 @@ class TestPlateRules(unittest.TestCase):
         # validate_targets accepts "40"; the engine then subtracted a string.
         self.assertIsNotNone(self._find(targets={"p": "40", "c": "60", "f": "20"}))
 
+    def test_repeat_searches_are_served_from_the_cache(self):
+        calls = []
+        real = self.finder._solve_pools
+        self.finder._solve_pools = lambda *a: calls.append(1) or real(*a)
+        first = self._find()
+        first["currently_serving"] = True  # callers add keys; the cache must not see them
+        again = self._find()
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("currently_serving", again)
+        self.assertEqual(again["plan"], first["plan"])
+        self.finder.find_best_meal({"p": 40, "c": 60, "f": 20}, ["Lunch", "Dinner"], ["rice"], {},
+                                   date_str=self.date_str)
+        self.assertEqual(len(calls), 2)  # different foods in the pools: a new search
+
     def test_same_search_gives_the_same_plate(self):
         # Near-ties used to flip between searches, so searching twice, or
         # opening a shared link, could show a different plate.

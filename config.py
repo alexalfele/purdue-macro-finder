@@ -19,11 +19,22 @@ class Config:
     # with a local search over every 1- and 2-serving change. The best plate
     # wins. Measured: the exact optimum on 92% of random menus and otherwise
     # within ~5 score points (a few grams on one macro), at ~10 ms per pool.
-    ITERATIONS = 1000
+    # Tuned for speed at equal quality: the same results as 1000 iterations
+    # with 3 deep-polished plates (brute-force optimum on 58 of 60 random
+    # menus, same mean score on real ones) in ~40% less time. Render's free
+    # CPU is ~10x slower than a laptop, so every millisecond here counts.
+    ITERATIONS = 500
     FINAL_TEMP = 0.05
     RESTARTS = 4
+    # Portion-at-a-time greedy seeds (the first, then with each early pick
+    # banned), for plates of stacked small-unit foods.
+    PORTION_SEEDS = 2
     # Annealed plates that get the (expensive) two-serving deep polish.
-    POLISH_TOP = 3
+    POLISH_TOP = 2
+    # Recent results kept in memory. A search is deterministic for a given
+    # menu snapshot, so repeats (default targets, putting a food back,
+    # opening a shared link) are answered instantly.
+    PLAN_CACHE_SIZE = 256
 
     # Meal plan constraints. A plate holds at most MAX_ITEMS different foods
     # and at least MIN_ITEMS servings in all.

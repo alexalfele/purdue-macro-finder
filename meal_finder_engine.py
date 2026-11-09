@@ -9,6 +9,7 @@ import math
 import os
 import logging
 from datetime import datetime, timedelta
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from zoneinfo import ZoneInfo
@@ -277,6 +278,10 @@ class MealFinder:
         self._load_locks_meta = threading.Lock()
         # Dates with a background load in flight, so we start at most one each.
         self._loading = set()
+
+        # Recent search results (see _plan_from_pools), least recent first.
+        self._plan_cache = OrderedDict()
+        self._plan_cache_lock = threading.Lock()
 
     # --- time helpers (always Purdue local time) ---
 
@@ -772,10 +777,10 @@ class MealFinder:
                 seeds.append(seed)
         # Portion-at-a-time seeds reach plates of stacked small-unit foods
         # that one-serving-at-a-time moves rarely find.
-        if any(c > Config.MAX_SERVINGS for c in cap):
+        if Config.PORTION_SEEDS and any(c > Config.MAX_SERVINGS for c in cap):
             portion = self._portion_seed(n, P, C, F, score, cap, targets["p"], rules=rules)
             seeds.append(portion)
-            for anchor in list(dict.fromkeys(portion))[:2]:
+            for anchor in list(dict.fromkeys(portion))[:Config.PORTION_SEEDS - 1]:
                 seed = self._portion_seed(n, P, C, F, score, cap, targets["p"], banned={anchor}, rules=rules)
                 if len(seed) >= Config.MIN_ITEMS:
                     seeds.append(seed)
@@ -1353,6 +1358,28 @@ class MealFinder:
         return random.Random(hashlib.sha256(key.encode("utf-8")).digest())
 
     def _plan_from_pools(self, snapshot, pools, targets, date_str):
+        """_solve_pools, remembering recent results.
+
+        The search is deterministic, so a repeat (same menu snapshot, same
+        foods in each pool, same targets) gets the stored answer. The pools'
+        food names stand in for the filters and exclusions. Callers may add
+        top-level keys to the result, so each gets its own copy.
+        """
+        key = (date_str, snapshot.get("loaded_at"), tuple(targets[k] for k in ("p", "c", "f")),
+               tuple((k, tuple(item.get("name") for item in pool)) for k, pool in sorted(pools.items())))
+        with self._plan_cache_lock:
+            if key in self._plan_cache:
+                self._plan_cache.move_to_end(key)
+                result = self._plan_cache[key]
+                return dict(result) if result is not None else None
+        result = self._solve_pools(snapshot, pools, targets, date_str)
+        with self._plan_cache_lock:
+            self._plan_cache[key] = result
+            while len(self._plan_cache) > Config.PLAN_CACHE_SIZE:
+                self._plan_cache.popitem(last=False)
+        return dict(result) if result is not None else None
+
+    def _solve_pools(self, snapshot, pools, targets, date_str):
         """Optimize every pool. Returns the best plate, plus an `options` list
         holding the best plate at each dining court (best first), or None.
 
