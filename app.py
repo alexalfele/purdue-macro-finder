@@ -1,21 +1,27 @@
+import gzip
+import hashlib
+import mimetypes
 import os
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, make_response, abort
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from meal_finder_engine import MealFinder
-from config import Config  # Import the Config class
+from config import Config
 import threading
 import time
 import requests
 import logging
 
 # --- 1. SETUP THE FLASK APP ---
-# Serve the bundled frontend (index.html) from this same directory so we don't
-# need a separate static server or hardcoded API_BASE_URL on the client.
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(APP_ROOT, "static")
 ENV_FILE = os.path.join(APP_ROOT, ".env")
+
+# The only static files served. Everything else in the project directory
+# (source, .env, caches) stays unreachable over HTTP.
+STATIC_FILES = {"app.css", "app.js", "legal.css", "chart.umd.min.js"}
 
 
 def _load_dotenv(path):
@@ -39,14 +45,27 @@ def _load_dotenv(path):
 
 _load_dotenv(ENV_FILE)
 
-# static_folder=None: do NOT expose the project directory over HTTP. The three
-# HTML pages are served by explicit routes below; there are no other static
-# assets (CSS/JS are inline, Chart.js is loaded from a CDN).
+# static_folder=None: do NOT expose the project directory over HTTP. Pages and
+# the allow-listed static files are served by explicit routes below.
 app = Flask(__name__, static_folder=None)
 # The API returns only public dining data, so cross-origin reads are fine, but
 # scope CORS to /api/* rather than opening the whole app.
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 logging.basicConfig(level=logging.INFO)
+
+# Every script and style is a file served by this app (Chart.js included), so
+# the policy needs neither 'unsafe-inline' nor any third-party origin.
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'none'; "
+    "form-action 'self'"
+)
 
 
 @app.after_request
@@ -55,21 +74,18 @@ def _security_headers(resp):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    resp.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    )
     # Harmless over plain HTTP (browsers ignore it); enforced once on Render's HTTPS.
     resp.headers.setdefault(
         "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
     )
-    resp.headers.setdefault(
-        "Content-Security-Policy",
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
-        "connect-src 'self'; "
-        "frame-ancestors 'none'; "
-        "base-uri 'none'; "
-        "form-action 'self'",
-    )
+    resp.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+    if request.path.startswith("/api/"):
+        resp.headers.setdefault("Cache-Control", "no-store")
     return resp
 
 # --- 2. CONFIGURE RATE LIMITING ---
@@ -143,32 +159,33 @@ def get_engine():
 
 MAX_EXCLUSIONS = 50
 MAX_EXCLUSION_LENGTH = 80
+MACRO_NAMES = {"p": "Protein", "c": "Carbs", "f": "Fat"}
+MODES = ("plan", "now")
 
 
 def validate_targets(targets):
     """Validates the macro targets dictionary."""
     if not isinstance(targets, dict):
         return False, "Targets must be an object with p, c, and f."
-    required_macros = ['p', 'c', 'f']
-    for macro in required_macros:
+    for macro, name in MACRO_NAMES.items():
         if macro not in targets:
             return False, f"Missing required macro: {macro}"
-        
-        value = targets[macro]
         try:
-            val = float(value)
-            if not Config.MIN_MACRO_TARGET <= val <= Config.MAX_MACRO_TARGET:
-                return False, f"Macro {macro} ({val}) is out of range. Must be between {Config.MIN_MACRO_TARGET} and {Config.MAX_MACRO_TARGET}."
+            val = float(targets[macro])
         except (ValueError, TypeError):
-            return False, f"Macro {macro} must be a valid number."
-            
+            return False, f"{name} must be a number."
+        if not Config.MIN_MACRO_TARGET <= val <= Config.MAX_MACRO_TARGET:
+            return False, (
+                f"{name} ({val:g} g) is out of range. Use "
+                f"{Config.MIN_MACRO_TARGET} to {Config.MAX_MACRO_TARGET} g."
+            )
     return True, None
 
 def validate_meal_periods(meal_periods):
     """Validates the list of meal periods."""
     if not meal_periods or not isinstance(meal_periods, list):
         return False, "Please select at least one meal period."
-    
+
     for period in meal_periods:
         if not isinstance(period, str) or period not in Config.MEAL_PERIODS:
             return False, f"Invalid meal period: {period}"
@@ -193,26 +210,92 @@ def validate_exclusion_list(exclusion_list):
             return False, f"Each excluded food must be text of at most {MAX_EXCLUSION_LENGTH} characters."
     return True, None
 
-# --- 6. ROUTES ---
-# Static pages and the health probe are exempt from rate limiting so ordinary
-# browsing isn't throttled; the API endpoints below keep their strict limits.
+# --- 6. PAGES AND STATIC FILES ---
+# Static and page routes are exempt from rate limiting so ordinary browsing
+# isn't throttled; the API endpoints below keep their strict limits.
+
+def _asset_version():
+    """Short content hash of the static files, appended to their URLs so a
+    deploy busts browser caches while unchanged files stay cached for a year."""
+    digest = hashlib.sha256()
+    for name in sorted(STATIC_FILES):
+        with open(os.path.join(STATIC_DIR, name), "rb") as f:
+            digest.update(f.read())
+    return digest.hexdigest()[:12]
+
+
+def _accepts_gzip():
+    return "gzip" in request.headers.get("Accept-Encoding", "").lower()
+
+
+def _respond(body, content_type, cache_control, gzipped=None):
+    """Bytes response, gzip-compressed when the client accepts it.
+
+    `gzipped` lets callers pass a precomputed compressed body.
+    """
+    if _accepts_gzip() and len(body) > 1024:
+        resp = make_response(gzipped if gzipped is not None else gzip.compress(body))
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp = make_response(body)
+    resp.headers["Content-Type"] = content_type
+    resp.headers["Cache-Control"] = cache_control
+    resp.headers["Vary"] = "Accept-Encoding"
+    return resp
+
+
+def _page(name):
+    """Serve an HTML page with its asset URLs versioned. Always revalidated."""
+    with open(os.path.join(APP_ROOT, name), encoding="utf-8") as f:
+        html = f.read().replace("__ASSET_VERSION__", _asset_version())
+    return _respond(html.encode("utf-8"), "text/html; charset=utf-8", "no-cache")
+
+
+# name -> (mtime, raw bytes, gzipped bytes); compressed once, not per request.
+_static_cache = {}
+
+
+def _static_bytes(name):
+    path = os.path.join(STATIC_DIR, name)
+    mtime = os.path.getmtime(path)
+    cached = _static_cache.get(name)
+    if cached is None or cached[0] != mtime:
+        with open(path, "rb") as f:
+            raw = f.read()
+        cached = (mtime, raw, gzip.compress(raw, compresslevel=9))
+        _static_cache[name] = cached
+    return cached[1], cached[2]
+
+
 @app.route("/")
 @limiter.exempt
 def index():
     """Serves the single-page frontend."""
-    return send_from_directory(APP_ROOT, "index.html")
+    return _page("index.html")
 
 @app.route("/terms")
 @limiter.exempt
 def terms():
     """Serves the Terms of Service page."""
-    return send_from_directory(APP_ROOT, "terms.html")
+    return _page("terms.html")
 
 @app.route("/privacy")
 @limiter.exempt
 def privacy():
     """Serves the Privacy Policy page."""
-    return send_from_directory(APP_ROOT, "privacy.html")
+    return _page("privacy.html")
+
+@app.route("/static/<name>")
+@limiter.exempt
+def static_asset(name):
+    """Serves the allow-listed CSS/JS. URLs carry a content hash, so they can
+    be cached as immutable."""
+    if name not in STATIC_FILES:
+        abort(404)
+    raw, compressed = _static_bytes(name)
+    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return _respond(raw, f"{mime}; charset=utf-8",
+                    "public, max-age=31536000, immutable", gzipped=compressed)
 
 @app.route("/api/health")
 @limiter.exempt
@@ -227,46 +310,64 @@ def health_check():
 @limiter.limit(limit_hour)
 @limiter.limit(limit_day)
 def api_find_meal():
+    """Find a plate that matches the targets.
+
+    mode "plan" (default): for `date` and `meal_periods`.
+    mode "now": from whatever is being served right now at Purdue; `date` and
+    `meal_periods` are ignored.
+    """
     engine = get_engine()
     try:
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify({"error": "Request body must be a JSON object."}), 400
+        mode = data.get('mode', 'plan')
         targets = data.get('targets', {})
         meal_periods = data.get('meal_periods', [])
         dietary_filters = data.get('dietary_filters', {})
         exclusion_list = data.get('exclusion_list', [])
-        raw_date = data.get('date')
 
-        valid, error = validate_targets(targets)
-        if not valid:
-            return jsonify({"error": error}), 400
+        if mode not in MODES:
+            return jsonify({"error": f"Mode must be one of {', '.join(MODES)}."}), 400
+        for valid, error in (
+            validate_targets(targets),
+            validate_dietary_filters(dietary_filters),
+            validate_exclusion_list(exclusion_list),
+        ):
+            if not valid:
+                return jsonify({"error": error}), 400
 
-        valid, error = validate_meal_periods(meal_periods)
-        if not valid:
-            return jsonify({"error": error}), 400
-
-        valid, error = validate_dietary_filters(dietary_filters)
-        if not valid:
-            return jsonify({"error": error}), 400
-
-        valid, error = validate_exclusion_list(exclusion_list)
-        if not valid:
-            return jsonify({"error": error}), 400
-
-        try:
-            date_str = engine.normalize_date(raw_date)
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+        if mode == "plan":
+            valid, error = validate_meal_periods(meal_periods)
+            if not valid:
+                return jsonify({"error": error}), 400
+            try:
+                date_str = engine.normalize_date(data.get('date'))
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+        else:
+            date_str = engine.normalize_date(None)  # today, in Purdue time
 
         # On a cold start the menu for this date isn't in memory yet. Rather than
-        # blocking the request for the full Purdue fetch (and risking the
-        # client's timeout), load in the background and tell the client to retry.
+        # blocking one of gunicorn's few threads for the full Purdue fetch (and
+        # risking the client's timeout), load in the background and tell the
+        # client to retry.
         if not engine.has_data(date_str):
             engine.ensure_loaded_async(date_str)
             return jsonify({
                 "error": "Menu data is still loading, please retry in a few seconds."
             }), 503
+
+        if mode == "now":
+            result = engine.find_meal_now(targets, exclusion_list, dietary_filters)
+            if result is None:
+                return jsonify({
+                    "error": (
+                        "Dining courts are serving right now, but no food fits your "
+                        "dietary filters and exclusions. Try loosening them."
+                    )
+                }), 404
+            return jsonify(result)
 
         result = engine.find_best_meal(
             targets,
@@ -275,7 +376,6 @@ def api_find_meal():
             dietary_filters,
             date_str=date_str,
         )
-
         if result is None:
             return jsonify({
                 "error": (
@@ -283,40 +383,10 @@ def api_find_meal():
                     "Try a different date, broader meal periods, or fewer dietary filters."
                 )
             }), 404
-
         return jsonify(result)
 
     except Exception:
         app.logger.exception("Error in /api/find_meal")
-        return jsonify({"error": "An internal error occurred."}), 500
-
-@app.route("/api/featured", methods=["GET"])
-@limiter.limit(limit_minute)
-@limiter.limit(limit_hour)
-@limiter.limit(limit_day)
-def api_featured():
-    """Returns the featured plate for what's being served right now (or the next
-    meal hint if it's outside dining hours). Optional ?date=YYYY-MM-DD."""
-    engine = get_engine()
-    raw_date = request.args.get("date")
-    try:
-        date_str = engine.normalize_date(raw_date)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-    # Same cold-start handling as /api/find_meal: never hold one of gunicorn's
-    # few threads for a full Purdue fetch; the client retries on 503.
-    if not engine.has_data(date_str):
-        engine.ensure_loaded_async(date_str)
-        return jsonify({
-            "error": "Menu data is still loading, please retry in a few seconds."
-        }), 503
-
-    try:
-        result = engine.featured_plate(date_str=date_str)
-        return jsonify(result)
-    except Exception:
-        app.logger.exception("Error in /api/featured")
         return jsonify({"error": "An internal error occurred."}), 500
 
 

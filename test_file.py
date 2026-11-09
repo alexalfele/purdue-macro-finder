@@ -344,9 +344,8 @@ class TestFindMealEndpoint(unittest.TestCase):
                     "totals": {"p": 0, "c": 0, "f": 0}, "date": kw.get("date_str"),
                 }
 
-            def featured_plate(self, date_str=None):
-                return {"currently_serving": False, "meal_periods": [],
-                        "next_meal_hint": "x", "plate": None, "date": date_str}
+            def find_meal_now(self, *a, **kw):
+                return {"currently_serving": False, "next_meal_hint": "Dinner starts at 5 pm"}
 
         self.stub = _StubEngine()
         app_module.get_engine = lambda: self.stub
@@ -407,13 +406,22 @@ class TestFindMealEndpoint(unittest.TestCase):
         resp = self._post_with(targets={"p": "40", "c": "60", "f": "20"})
         self.assertEqual(resp.status_code, 200)
 
-    def test_featured_cold_start_returns_503_then_succeeds(self):
-        # /api/featured used to block a worker thread for the whole Purdue
-        # fetch on a cold start; it now answers 503 and loads in the background.
-        resp = self.client.get("/api/featured?date=2026-06-15")
-        self.assertEqual(resp.status_code, 503)
-        resp = self.client.get("/api/featured?date=2026-06-15")
+    def test_now_mode_needs_no_date_or_meal_periods(self):
+        payload = {"mode": "now", "targets": {"p": 40, "c": 60, "f": 20}}
+        self.assertEqual(self.client.post("/api/find_meal", json=payload).status_code, 503)
+        resp = self.client.post("/api/find_meal", json=payload)
         self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.get_json()["currently_serving"])
+
+    def test_unknown_mode_is_400(self):
+        self.assertEqual(self._post_with(mode="later").status_code, 400)
+
+    def test_featured_endpoint_is_gone(self):
+        # Replaced by mode "now", which uses the visitor's own targets.
+        self.assertEqual(self.client.get("/api/featured").status_code, 404)
+
+    def test_api_responses_are_not_cached(self):
+        self.assertEqual(self._post_with().headers.get("Cache-Control"), "no-store")
 
 
 class TestExclusionList(unittest.TestCase):
@@ -498,9 +506,52 @@ class TestSecurityHardening(unittest.TestCase):
         h = self.client.get("/").headers
         self.assertEqual(h.get("X-Content-Type-Options"), "nosniff")
         self.assertEqual(h.get("X-Frame-Options"), "DENY")
+        self.assertEqual(h.get("Cross-Origin-Opener-Policy"), "same-origin")
+        self.assertIn("geolocation=()", h.get("Permissions-Policy", ""))
         self.assertIn("Strict-Transport-Security", h)
-        self.assertIn("default-src 'self'", h.get("Content-Security-Policy", ""))
-        self.assertIn("frame-ancestors 'none'", h.get("Content-Security-Policy", ""))
+        csp = h.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'self'", csp)
+        self.assertIn("frame-ancestors 'none'", csp)
+        self.assertIn("object-src 'none'", csp)
+
+    def test_csp_allows_no_inline_code_or_third_parties(self):
+        csp = self.client.get("/").headers["Content-Security-Policy"]
+        self.assertNotIn("unsafe-inline", csp)
+        self.assertNotIn("http", csp)
+
+    def test_pages_have_no_inline_scripts_or_styles(self):
+        # Required by the CSP above: inline code would be blocked.
+        import re
+        for path in ("/", "/terms", "/privacy"):
+            html = self.client.get(path).get_data(as_text=True)
+            self.assertNotRegex(html, r"<script(?![^>]*\bsrc=)", path)
+            self.assertNotIn("<style", html, path)
+            self.assertNotRegex(html, r'\sstyle="', path)
+            self.assertNotRegex(html, r"\son[a-z]+=", path)
+            head = html.split("<body", 1)[0]
+            self.assertFalse(re.search(r"https?://", head), f"{path} loads something from another origin")
+
+    def test_static_assets_are_versioned_and_cached(self):
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertNotIn("__ASSET_VERSION__", html)
+        import re
+        for url in re.findall(r'(?:href|src)="(/static/[^"]+)"', html):
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, 200, url)
+            self.assertIn("immutable", resp.headers["Cache-Control"], url)
+            self.assertIn("?v=", url)
+
+    def test_static_assets_are_gzipped_when_accepted(self):
+        plain = self.client.get("/static/chart.umd.min.js")
+        zipped = self.client.get("/static/chart.umd.min.js", headers={"Accept-Encoding": "gzip, br"})
+        self.assertIsNone(plain.headers.get("Content-Encoding"))
+        self.assertEqual(zipped.headers.get("Content-Encoding"), "gzip")
+        self.assertLess(len(zipped.get_data()), len(plain.get_data()) / 2)
+        self.assertIn("javascript", zipped.headers["Content-Type"])
+
+    def test_only_allow_listed_static_files(self):
+        for path in ("/static/app.py", "/static/.env", "/static/..%2Fapp.py", "/static/"):
+            self.assertEqual(self.client.get(path).status_code, 404, path)
 
     def test_no_admin_route(self):
         self.assertEqual(self.client.get("/admin").status_code, 404)
@@ -665,6 +716,19 @@ class TestPlateRules(unittest.TestCase):
         for _ in range(5):
             self.assertNotIn("Arugula", [i["name"] for i in self._find(meals=("Lunch",))["plan"]])
 
+    def test_options_hold_each_courts_best_plate_best_first(self):
+        with self.finder.data_lock:
+            self.finder.menu_by_date[self.date_str]["master"].extend([
+                _food("Ford Turkey", "Lunch", 25, 30, 8, court="Ford"),
+                _food("Ford Fries", "Lunch", 3, 40, 15, court="Ford"),
+            ])
+        result = self._find()
+        options = result["options"]
+        self.assertEqual(sorted(o["court"] for o in options), ["Ford", "Wiley"])
+        self.assertEqual([o["score"] for o in options], sorted(o["score"] for o in options))
+        self.assertEqual((result["court"], result["meal_name"]),
+                         (options[0]["court"], options[0]["meal_name"]))
+
     def test_numeric_string_targets_do_not_crash(self):
         # validate_targets accepts "40"; the engine then subtracted a string.
         self.assertIsNotNone(self._find(targets={"p": "40", "c": "60", "f": "20"}))
@@ -761,8 +825,9 @@ class TestOptimizer(unittest.TestCase):
         self.assertIsNone(plan)
 
 
-class TestFeaturedPlate(unittest.TestCase):
-    """'Right now' uses Purdue's published per-court hours, in Purdue time."""
+class TestMealNow(unittest.TestCase):
+    """"Right now" optimizes over the meals open at this moment, by Purdue's
+    published per-court hours, in Purdue time."""
 
     def setUp(self):
         self.finder = MealFinder()
@@ -774,10 +839,13 @@ class TestFeaturedPlate(unittest.TestCase):
             _food("Steamed Broccoli", "Dinner", 3, 6, 0, traits=["Vegan", "Vegetarian"]),
             _food("Turkey Sandwich", "Lunch", 25, 30, 8, court="Ford"),
             _food("Pasta Salad", "Lunch", 6, 35, 7, court="Ford"),
+            _food("Pot Roast", "Dinner", 28, 8, 12, court="Earhart"),
+            _food("Mashed Potatoes", "Dinner", 4, 35, 9, court="Earhart"),
         ]
         hours = {
             ("Wiley", "Dinner"): {"start": self._at(17), "end": self._at(21), "status": "OPEN"},
             ("Ford", "Lunch"): {"start": self._at(11), "end": self._at(14), "status": "OPEN"},
+            ("Earhart", "Dinner"): {"start": self._at(17), "end": self._at(20), "status": "OPEN"},
         }
         with self.finder.data_lock:
             self.finder.menu_by_date[self.date_str] = {"master": master, "hours": hours}
@@ -786,27 +854,42 @@ class TestFeaturedPlate(unittest.TestCase):
     def _at(self, hour, minute=0):
         return datetime.combine(self.day, time(hour, minute), tzinfo=PURDUE_TZ)
 
-    def test_serves_the_meal_open_by_real_hours(self):
-        result = self.finder.featured_plate(self.date_str, now=self._at(18))
+    def _now(self, at, **kw):
+        return self.finder.find_meal_now({"p": 40, "c": 50, "f": 10}, now=at, **kw)
+
+    def test_uses_only_meals_open_now(self):
+        result = self._now(self._at(18))
         self.assertTrue(result["currently_serving"])
-        self.assertEqual((result["plate"]["court"], result["plate"]["meal_name"]), ("Wiley", "Dinner"))
-        self.assertEqual(result["plate"]["hours"]["label"], "5 to 9 pm")
+        self.assertEqual(result["meal_name"], "Dinner")
+        courts = {o["court"] for o in result["options"]}
+        self.assertEqual(courts, {"Wiley", "Earhart"})  # Ford lunch is over
+        wiley = next(o for o in result["options"] if o["court"] == "Wiley")
+        self.assertEqual(wiley["hours"]["label"], "5 to 9 pm")
+
+    def test_court_that_closed_early_is_skipped(self):
+        result = self._now(self._at(20, 30))  # Earhart closes at 8, Wiley at 9
+        self.assertEqual([o["court"] for o in result["options"]], ["Wiley"])
+
+    def test_uses_the_visitors_targets_and_filters(self):
+        # Regression: the old "featured plate" ignored targets entirely and
+        # served 27 g protein / 125 g carbs. Vegan here leaves only broccoli.
+        result = self._now(self._at(18), dietary_filters={"Vegan": True})
+        self.assertIsNone(result)  # one vegan food can't make a 2-item plate
 
     def test_between_meals_points_to_next_opening(self):
-        result = self.finder.featured_plate(self.date_str, now=self._at(15))
+        result = self._now(self._at(15))
         self.assertFalse(result["currently_serving"])
         self.assertEqual(result["next_meal_hint"], "Dinner starts at 5 pm")
 
     def test_after_last_meal(self):
-        result = self.finder.featured_plate(self.date_str, now=self._at(22))
+        result = self._now(self._at(22))
         self.assertFalse(result["currently_serving"])
         self.assertIn("tomorrow", result["next_meal_hint"])
 
     def test_server_clock_in_utc_still_uses_purdue_time(self):
         # Regression: Render runs on UTC, so at 6 pm Purdue time the server's
         # naive clock read 11 pm and "Right now" said nothing was being served.
-        utc_now = self._at(18).astimezone(timezone.utc)
-        result = self.finder.featured_plate(self.date_str, now=utc_now)
+        result = self._now(self._at(18).astimezone(timezone.utc))
         self.assertTrue(result["currently_serving"])
 
 
@@ -851,6 +934,21 @@ class TestSnapshotFreshness(unittest.TestCase):
         today = MealFinder._today()
         self.assertFalse(self.finder._snapshot_is_stale(self._snap(ttl / 2), today))
         self.assertTrue(self.finder._snapshot_is_stale(self._snap(ttl * 2), today))
+
+    def test_preloads_today_then_tomorrow(self):
+        loaded, done = [], __import__("threading").Event()
+
+        def fake_load(date_str, refresh=False):
+            loaded.append(date_str)
+            if len(loaded) == 2:
+                done.set()
+
+        self.finder._load_menu_for_date = fake_load
+        self.finder.start_background_loaders()
+        self.assertTrue(done.wait(2))
+        today = self.now.date()
+        self.assertEqual(loaded, [today.strftime("%Y-%m-%d"),
+                                  (today + timedelta(days=1)).strftime("%Y-%m-%d")])
 
     def test_stale_menu_is_served_while_refreshing_in_background(self):
         today = MealFinder._today()

@@ -532,9 +532,25 @@ class MealFinder:
             self._start_background_load(date_str)
 
     def start_background_loaders(self):
-        """Preloads today's menu data so the first user request is instant."""
-        logger.info("Starting background loaders for today...")
-        self._start_background_load(self._today())
+        """Preload today's menu, then tomorrow's, so the first "right now"
+        request and the common "plan tomorrow" request are both instant.
+
+        One thread, one date at a time, to stay gentle on Purdue's API. A
+        request for either date meanwhile waits on the same per-date lock
+        instead of fetching it twice.
+        """
+        today = self._now().date()
+        dates = [d.strftime("%Y-%m-%d") for d in (today, today + timedelta(days=1))]
+        logger.info(f"Preloading menus for {', '.join(dates)}...")
+
+        def run():
+            for date_str in dates:
+                try:
+                    self._load_menu_for_date(date_str)
+                except Exception:
+                    logger.exception(f"Preloading the menu for {date_str} failed")
+
+        threading.Thread(target=run, daemon=True, name="MenuPreloader").start()
 
     # --- meal-finding algorithm ---
 
@@ -859,6 +875,70 @@ class MealFinder:
         h = (snapshot.get("hours") or {}).get((court, meal_name)) or {}
         return _hours_payload(h.get("start"), h.get("end"))
 
+    @staticmethod
+    def _coerce_targets(targets):
+        return {k: float(targets[k]) for k in ("p", "c", "f")}
+
+    def _build_pools(self, items, include, dietary_filters, exclusion_list):
+        """Group eligible foods into (court, meal) pools where include(court, meal) holds."""
+        # Forgiving, case-insensitive substring match so users can type
+        # "eggs" and exclude "Scrambled Eggs" without knowing the exact name.
+        excluded_terms = [
+            str(term).strip().lower() for term in (exclusion_list or []) if str(term).strip()
+        ]
+        pools, seen = {}, set()
+        for item in items:
+            key = (item["court"], item["meal_name"])
+            if not include(*key):
+                continue
+            if item.get("p", 0) + item.get("c", 0) + item.get("f", 0) < Config.MIN_ITEM_MACROS:
+                continue
+            if not self._passes_filters(item, dietary_filters):
+                continue
+            name = (item.get("name") or "").lower()
+            if any(term in name for term in excluded_terms) or (key, name) in seen:
+                continue
+            seen.add((key, name))
+            pools.setdefault(key, []).append(item)
+        return pools
+
+    def _plan_from_pools(self, snapshot, pools, targets, date_str):
+        """Optimize every pool. Returns the best plate, plus an `options` list
+        holding the best plate at each dining court (best first), or None.
+
+        Each (court, meal period) is optimized separately: a plate can only use
+        food served at one place at one time, so lunch and dinner items are
+        never combined.
+        """
+        best_by_court = {}
+        for (court, meal_name), pool in pools.items():
+            plan, score, totals = self._optimize_pool(
+                pool, targets, Config.WEIGHTS, Config.PENALTIES
+            )
+            if not plan:
+                continue
+            if court not in best_by_court or score < best_by_court[court][0]:
+                best_by_court[court] = (score, {
+                    "score": round(score, 3),
+                    "court": court,
+                    "meal_name": meal_name,
+                    "hours": self._hours_for(snapshot, court, meal_name),
+                    "plan": plan,
+                    "totals": totals,
+                })
+        if not best_by_court:
+            return None
+
+        options = [option for _, option in sorted(best_by_court.values(), key=lambda pair: pair[0])]
+        loaded_at = snapshot.get("loaded_at")
+        return {
+            **options[0],
+            "options": options,
+            "targets": targets,
+            "date": date_str,
+            "menu_updated": loaded_at.isoformat() if loaded_at else None,
+        }
+
     def find_best_meal(
         self,
         targets,
@@ -867,78 +947,65 @@ class MealFinder:
         dietary_filters=None,
         date_str=None,
     ):
-        """Finds the best single-meal plate for the date across all dining courts.
-
-        Each (court, meal period) is optimized separately: a plate can only use
-        food served at one place at one time, so lunch and dinner items are
-        never combined.
-        """
-        exclusion_list = exclusion_list or []
-        dietary_filters = dietary_filters or {}
-        targets = {k: float(targets[k]) for k in ("p", "c", "f")}
-
-        # Forgiving, case-insensitive substring match so users can type
-        # "eggs" and exclude "Scrambled Eggs" without knowing the exact name.
-        excluded_terms = [
-            str(term).strip().lower() for term in exclusion_list if str(term).strip()
-        ]
-
-        def _is_excluded(item):
-            name = (item.get("name") or "").lower()
-            return any(term in name for term in excluded_terms)
-
+        """Best plate for the date and meal periods across all dining courts,
+        plus each court's best plate in `options`. None if nothing fits."""
+        targets = self._coerce_targets(targets)
         date_str = self.normalize_date(date_str)
         self.ensure_loaded(date_str)
 
         snapshot = self._get_snapshot(date_str)
-        if not snapshot:
-            logger.warning(f"No menu data for {date_str}")
-            return None
-        snapshot_items = list(snapshot["master"])
-        if not snapshot_items:
+        if not snapshot or not snapshot.get("master"):
             logger.warning(f"Menu for {date_str} is empty (Purdue may not have published it).")
             return None
 
-        pools, seen = {}, set()
-        for item in snapshot_items:
-            if item["meal_name"] not in meal_periods_to_check:
-                continue
-            if item.get("p", 0) + item.get("c", 0) + item.get("f", 0) < Config.MIN_ITEM_MACROS:
-                continue
-            if not self._passes_filters(item, dietary_filters) or _is_excluded(item):
-                continue
-            key = (item["court"], item["meal_name"], (item.get("name") or "").lower())
-            if key in seen:
-                continue
-            seen.add(key)
-            pools.setdefault((item["court"], item["meal_name"]), []).append(item)
-
+        wanted = set(meal_periods_to_check or [])
+        pools = self._build_pools(
+            snapshot["master"], lambda court, meal: meal in wanted,
+            dietary_filters or {}, exclusion_list,
+        )
         if not pools:
             logger.warning(
-                f"No courts available for date={date_str} meals={meal_periods_to_check} "
-                f"filters={dietary_filters}"
+                f"No food fits date={date_str} meals={sorted(wanted)} filters={dietary_filters}"
             )
             return None
+        return self._plan_from_pools(snapshot, pools, targets, date_str)
 
-        best, best_score = None, float("inf")
-        weights, penalties = Config.WEIGHTS, Config.PENALTIES
-        for (court, meal_name), pool in pools.items():
-            plan, score, totals = self._optimize_pool(pool, targets, weights, penalties)
-            if plan and score < best_score:
-                best_score = score
-                best = {
-                    "score": round(score, 3),
-                    "court": court,
-                    "meal_name": meal_name,
-                    "hours": self._hours_for(snapshot, court, meal_name),
-                    "plan": plan,
-                    "totals": totals,
-                    "targets": targets,
-                    "date": date_str,
-                }
-        return best
+    def find_meal_now(self, targets, exclusion_list=None, dietary_filters=None, now=None):
+        """Best plate from the meals being served right now, by Purdue's
+        published per-court hours.
 
-    # --- featured plate ("right now") ---
+        Returns {"currently_serving": False, "next_meal_hint": ...} when nothing
+        is open, None when meals are open but no food passes the filters, and
+        otherwise the same payload as find_best_meal with currently_serving=True.
+        """
+        targets = self._coerce_targets(targets)
+        now = self._as_purdue_time(now) if now is not None else self._now()
+        date_str = now.strftime("%Y-%m-%d")
+        self.ensure_loaded(date_str)
+
+        snapshot = self._get_snapshot(date_str) or {}
+        items = snapshot.get("master") or []
+        if not items:
+            return {
+                "currently_serving": False,
+                "next_meal_hint": "Purdue hasn't published today's menu yet",
+                "date": date_str,
+            }
+
+        open_pairs, hint = self._open_meals(items, snapshot.get("hours") or {}, now)
+        if not open_pairs:
+            return {"currently_serving": False, "next_meal_hint": hint, "date": date_str}
+
+        pools = self._build_pools(
+            items, lambda court, meal: (court, meal) in open_pairs,
+            dietary_filters or {}, exclusion_list,
+        )
+        result = self._plan_from_pools(snapshot, pools, targets, date_str) if pools else None
+        if result is not None:
+            result["currently_serving"] = True
+        return result
+
+    # --- what's open when ---
 
     @staticmethod
     def _meal_periods_at(now):
@@ -991,182 +1058,7 @@ class MealFinder:
             if upcoming:
                 start, meal = upcoming[0]
                 return set(), f"{meal} starts at {_format_clock(start.hour, start.minute)}"
-            return set(), "Dining courts are done serving for today. Check back tomorrow."
+            return set(), "Dining courts are closed until tomorrow"
 
         names, hint = self._meal_periods_at(at)
         return {p for p in pairs if p[1] in names}, hint
-
-    def _build_featured_plate(self, items, court, meal_name):
-        """Picks 3 complementary items from a single court+meal pool: a high-protein
-        main, a complementary carb, and a low-fat side. Returns None if we can't
-        assemble a sensible plate."""
-        if len(items) < 2:
-            return None
-
-        # Deduplicate by name (Purdue often lists the same item at multiple stations)
-        seen, deduped = set(), []
-        for it in items:
-            if it["name"] not in seen:
-                seen.add(it["name"])
-                deduped.append(it)
-        items = deduped
-
-        if not items:
-            return None
-
-        # 1. Main: highest protein
-        sorted_by_p = sorted(items, key=lambda i: i.get("p", 0), reverse=True)
-        main = sorted_by_p[0]
-        plate = [main]
-
-        # 2. Carb: highest carbs that's not the main and adds some carbs
-        carb_candidates = [
-            i for i in items
-            if i["name"] != main["name"] and i.get("c", 0) >= 10
-        ]
-        if carb_candidates:
-            carb = sorted(carb_candidates, key=lambda i: i.get("c", 0), reverse=True)[0]
-            plate.append(carb)
-
-        # 3. Side/veggie: prefer real food, low-fat, with actual substance.
-        # Filter out condiments — Purdue's API marks them with serving sizes
-        # like "Tablespoon" or "Teaspoon", which is a clean tell.
-        used = {p["name"] for p in plate}
-        condiment_units = ("tablespoon", "teaspoon", "tbsp", "tsp", "packet", "pkt")
-        # Anything whose *name* contains one of these is an auxiliary, not a side dish.
-        condiment_words = ("sauce", "dressing", "syrup", "spread", "topping",
-                           "dip", "marinade", "glaze", "vinaigrette", "salsa",
-                           "ketchup", "mustard", "mayo", "butter")
-
-        def _is_condiment(it):
-            ss = (it.get("serving_size") or "").lower()
-            name = (it.get("name") or "").lower()
-            if any(u in ss for u in condiment_units):
-                return True
-            if any(w in name for w in condiment_words):
-                return True
-            return False
-
-        def _is_substantial(it):
-            return (it.get("p", 0) + it.get("c", 0) + it.get("f", 0)) >= 8
-
-        substantial_sides = [
-            i for i in items
-            if i["name"] not in used
-            and i.get("f", 0) <= 8
-            and _is_substantial(i)
-            and not _is_condiment(i)
-        ]
-        # Bias toward items tagged Vegetarian/Vegan
-        substantial_sides.sort(
-            key=lambda i: (
-                ("Vegan" in i.get("traits", []) or "Vegetarian" in i.get("traits", [])),
-                -i.get("f", 0),
-            ),
-            reverse=True,
-        )
-        if substantial_sides:
-            plate.append(substantial_sides[0])
-        # If no substantial side exists, ship the 2-item plate rather than
-        # padding with a condiment.
-
-        if len(plate) < 2:
-            return None
-
-        totals = {
-            "p": round(sum(i.get("p", 0) for i in plate), 1),
-            "c": round(sum(i.get("c", 0) for i in plate), 1),
-            "f": round(sum(i.get("f", 0) for i in plate), 1),
-            "cal": round(sum(float(i.get("cal", 0) or 0) for i in plate)),
-        }
-
-        return {
-            "court": court,
-            "meal_name": meal_name,
-            "plan": [dict(i, servings=1) for i in plate],
-            "totals": totals,
-        }
-
-    def featured_plate(self, date_str=None, now=None):
-        """Returns the featured plate for the current moment, or info about the next
-        meal if nothing is currently being served.
-
-        Shape:
-          {
-            currently_serving: bool,
-            meal_periods: [...],          # what's open right now
-            next_meal_hint: "Lunch starts at 11 am",  # only when not currently_serving
-            plate: { court, meal_name, hours, plan, totals },  # only when currently_serving
-            date: "YYYY-MM-DD"
-          }
-        """
-        date_str = self.normalize_date(date_str)
-        self.ensure_loaded(date_str)
-        now = self._as_purdue_time(now) if now is not None else self._now()
-
-        snapshot = self._get_snapshot(date_str) or {}
-        items = list(snapshot.get("master") or [])
-        hours = snapshot.get("hours") or {}
-
-        if not items:
-            return {
-                "currently_serving": False,
-                "meal_periods": [],
-                "next_meal_hint": "Menu data is empty for this date.",
-                "plate": None,
-                "date": date_str,
-            }
-
-        # For another day, ask what's served at this same clock time that day.
-        is_today = date_str == now.strftime("%Y-%m-%d")
-        target_day = datetime.strptime(date_str, "%Y-%m-%d").date()
-        at = datetime.combine(target_day, now.timetz())
-
-        open_pairs, next_hint = self._open_meals(items, hours, at)
-        if not open_pairs and not is_today:
-            # Planning ahead: nothing at this hour that day, so feature any meal.
-            open_pairs, next_hint = {(it["court"], it["meal_name"]) for it in items}, None
-
-        order = {m: i for i, m in enumerate(Config.MEAL_PERIODS)}
-        meal_periods = sorted({m for _, m in open_pairs}, key=lambda m: order.get(m, 99))
-
-        if not open_pairs:
-            return {
-                "currently_serving": False,
-                "meal_periods": [],
-                "next_meal_hint": next_hint or "No meal currently being served.",
-                "plate": None,
-                "date": date_str,
-            }
-
-        # Group available items by (court, meal) and pick the combination with
-        # the most items — gives the algorithm room to build a balanced plate.
-        groups = {}
-        for item in items:
-            key = (item["court"], item["meal_name"])
-            if key in open_pairs:
-                groups.setdefault(key, []).append(item)
-
-        # Sort by item count (descending) and try to build a plate from each in
-        # turn — if one court has too few usable items, fall through to the next.
-        for (court, meal_name), pool in sorted(
-            groups.items(), key=lambda kv: len(kv[1]), reverse=True
-        ):
-            plate = self._build_featured_plate(pool, court, meal_name)
-            if plate:
-                plate["hours"] = self._hours_for(snapshot, court, meal_name)
-                return {
-                    "currently_serving": True,
-                    "meal_periods": meal_periods,
-                    "next_meal_hint": None,
-                    "plate": plate,
-                    "date": date_str,
-                }
-
-        return {
-            "currently_serving": True,
-            "meal_periods": meal_periods,
-            "next_meal_hint": None,
-            "plate": None,
-            "date": date_str,
-        }
