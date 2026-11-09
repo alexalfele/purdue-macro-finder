@@ -141,8 +141,14 @@ def get_engine():
 
 # --- 5. INPUT VALIDATION FUNCTIONS ---
 
+MAX_EXCLUSIONS = 50
+MAX_EXCLUSION_LENGTH = 80
+
+
 def validate_targets(targets):
     """Validates the macro targets dictionary."""
+    if not isinstance(targets, dict):
+        return False, "Targets must be an object with p, c, and f."
     required_macros = ['p', 'c', 'f']
     for macro in required_macros:
         if macro not in targets:
@@ -164,9 +170,27 @@ def validate_meal_periods(meal_periods):
         return False, "Please select at least one meal period."
     
     for period in meal_periods:
-        if period not in Config.MEAL_PERIODS:
+        if not isinstance(period, str) or period not in Config.MEAL_PERIODS:
             return False, f"Invalid meal period: {period}"
-            
+
+    return True, None
+
+def validate_dietary_filters(dietary_filters):
+    """Dietary filters must be an object like {"Vegan": true}."""
+    if not isinstance(dietary_filters, dict):
+        return False, "Dietary filters must be an object."
+    return True, None
+
+def validate_exclusion_list(exclusion_list):
+    """Exclusions must be a short list of short strings. A bare string would be
+    iterated letter by letter and exclude nearly every food."""
+    if not isinstance(exclusion_list, list):
+        return False, "Exclusion list must be a list of food names."
+    if len(exclusion_list) > MAX_EXCLUSIONS:
+        return False, f"Exclude at most {MAX_EXCLUSIONS} foods."
+    for term in exclusion_list:
+        if not isinstance(term, str) or len(term) > MAX_EXCLUSION_LENGTH:
+            return False, f"Each excluded food must be text of at most {MAX_EXCLUSION_LENGTH} characters."
     return True, None
 
 # --- 6. ROUTES ---
@@ -222,6 +246,14 @@ def api_find_meal():
         if not valid:
             return jsonify({"error": error}), 400
 
+        valid, error = validate_dietary_filters(dietary_filters)
+        if not valid:
+            return jsonify({"error": error}), 400
+
+        valid, error = validate_exclusion_list(exclusion_list)
+        if not valid:
+            return jsonify({"error": error}), 400
+
         try:
             date_str = engine.normalize_date(raw_date)
         except ValueError as e:
@@ -271,6 +303,14 @@ def api_featured():
         date_str = engine.normalize_date(raw_date)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+    # Same cold-start handling as /api/find_meal: never hold one of gunicorn's
+    # few threads for a full Purdue fetch; the client retries on 503.
+    if not engine.has_data(date_str):
+        engine.ensure_loaded_async(date_str)
+        return jsonify({
+            "error": "Menu data is still loading, please retry in a few seconds."
+        }), 503
 
     try:
         result = engine.featured_plate(date_str=date_str)
