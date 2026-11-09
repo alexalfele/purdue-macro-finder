@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # matches PYTHON_VERSION in render.yaml
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      # The suite stubs Purdue's API, so it needs no network. Runners use UTC,
+      # which also exercises the Purdue-time handling.
+      - name: Run tests
+        run: python -m unittest test_file -v
