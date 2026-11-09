@@ -52,6 +52,11 @@ class Config:
     # is retried after this many minutes instead of waiting out the full TTL.
     INCOMPLETE_RETRY_MINUTES = 10
 
+    # When nothing is open, "Right now" plans the next meal: whatever starts
+    # within this many minutes of the first opening, so at 6 am it's breakfast
+    # at 7, not a court whose first meal is lunch at 11.
+    NEXT_MEAL_WINDOW_MINUTES = 60
+
     # Validation limits
     MAX_MACRO_TARGET = 500  # grams
     MIN_MACRO_TARGET = 0
@@ -62,6 +67,24 @@ class Config:
     # Meal periods — these must match the names Purdue's API returns. Brunch is
     # weekend-only at Hillenbrand and replaces Breakfast there.
     MEAL_PERIODS = ["Breakfast", "Brunch", "Lunch", "Late Lunch", "Dinner"]
+
+    # Dietary filters the API accepts. Diet filters keep only foods Purdue tags
+    # that way (Vegetarian also accepts Vegan). Each "No ..." filter drops any
+    # food tagged with one of its traits; wheat always contains gluten. These
+    # come from Purdue's labels, which can be incomplete.
+    DIET_FILTERS = ("Vegetarian", "Vegan")
+    AVOID_FILTERS = {
+        "No Gluten": ("Gluten", "Wheat", "Contains Gluten"),
+        "No Milk": ("Milk",),
+        "No Eggs": ("Eggs",),
+        "No Soy": ("Soy",),
+        "No Peanuts": ("Peanuts",),
+        "No Tree Nuts": ("Tree Nuts",),
+        "No Fish": ("Fish",),
+        "No Shellfish": ("Shellfish",),
+        "No Sesame": ("Sesame",),
+        "No Coconut": ("Coconut",),
+    }
 
     # Purdue API
     PURDUE_API_URL = "https://api.hfs.purdue.edu/menus/v3/GraphQL"

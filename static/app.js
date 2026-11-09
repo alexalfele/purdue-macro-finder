@@ -26,12 +26,17 @@
         switchToPlan: $('switch-to-plan'),
         loading: $('loading-spinner'),
         loadingText: $('loading-text'),
+        targetKcal: $('target-kcal'),
         content: $('results-content'),
         header: $('result-header'),
+        note: $('result-note'),
         where: $('result-where'),
         match: $('result-match'),
         totals: $('totals-body'),
+        nutritionExtra: $('nutrition-extra'),
         items: $('meal-plan-items'),
+        leftOff: $('left-off'),
+        leftOffList: $('left-off-list'),
         chartSection: $('chart-section'),
         chart: $('macro-chart'),
         optionsSection: $('options-section'),
@@ -55,6 +60,11 @@
     let retries = 0;
     let current = null;   // last successful result from the API
     let selected = 0;     // which of current.options is shown
+    let keepCourt = null; // after a swap, stay on the dining court being viewed
+
+    // Purdue's allergen tags, in the order the Avoid filters list them.
+    const ALLERGENS = ['Gluten', 'Wheat', 'Milk', 'Eggs', 'Soy', 'Peanuts', 'Tree Nuts',
+        'Fish', 'Shellfish', 'Sesame', 'Coconut'];
 
     // --- small helpers ---
 
@@ -91,6 +101,14 @@
 
     const grams = (v) => `${Math.round(v || 0)} g`;
 
+    // Calories implied by macros, at 4/4/9 kcal per gram.
+    const estimateKcal = (m) => Math.round(4 * (m.p || 0) + 4 * (m.c || 0) + 9 * (m.f || 0));
+
+    function updateKcal() {
+        const kcal = estimateKcal({ p: readGrams(els.protein), c: readGrams(els.carbs), f: readGrams(els.fat) });
+        els.targetKcal.textContent = kcal > 0 ? `About ${kcal.toLocaleString()} kcal` : '';
+    }
+
     function cssVar(name) {
         return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     }
@@ -111,7 +129,7 @@
             date: els.date.value || todayLocal(),
             meals: els.meals.filter((cb) => cb.checked).map((cb) => cb.value),
             diet: els.filters.filter((cb) => cb.checked).map((cb) => cb.dataset.filter),
-            exclude: els.exclusions.value.split('\n').map((s) => s.trim()).filter(Boolean),
+            exclude: exclusionList(),
         };
     }
 
@@ -126,7 +144,36 @@
         const inRange = s.date && s.date >= els.date.min && s.date <= els.date.max;
         els.date.value = inRange ? s.date : todayLocal();
         setMode(s.mode === 'plan' ? 'plan' : 'now');
+        updateKcal();
     }
+
+    // --- exclusions, including one-tap "Not this" swaps ---
+
+    function exclusionList() {
+        return els.exclusions.value.split('\n').map((t) => t.trim()).filter(Boolean);
+    }
+
+    function setExclusions(list) {
+        els.exclusions.value = list.join('\n');
+    }
+
+    // Leave a food off and rebuild the plate at the same dining court.
+    function leaveOff(name) {
+        const term = name.slice(0, MAX_EXCLUSION_LENGTH);
+        const list = exclusionList();
+        if (!list.some((t) => t.toLowerCase() === term.toLowerCase())) list.push(term);
+        setExclusions(list);
+        keepCourt = currentOption().court;
+        search({ inPlace: true });
+    }
+
+    function putBack(term) {
+        setExclusions(exclusionList().filter((t) => t !== term));
+        keepCourt = currentOption().court;
+        search({ inPlace: true });
+    }
+
+    const currentOption = () => (current.options && current.options[selected]) || current;
 
     function save(settings) {
         // The planning date is deliberately not remembered: tomorrow it's stale.
@@ -232,13 +279,18 @@
         return { status: res.status, ok: res.ok, data };
     }
 
-    function setBusy(busy, message) {
+    // inPlace keeps the current plate on screen (dimmed) while it's rebuilt,
+    // so a swap doesn't make the page jump.
+    function setBusy(busy, message, { inPlace = false } = {}) {
         els.generate.disabled = busy;
         els.panel.setAttribute('aria-busy', String(busy));
+        els.content.classList.toggle('is-updating', busy && inPlace);
+        els.content.querySelectorAll('button').forEach((b) => { b.disabled = busy; });
         if (busy) {
             els.generate.textContent = 'Finding...';
-            els.loadingText.textContent = message;
             setStatus(message);
+            if (inPlace) return;
+            els.loadingText.textContent = message;
             els.placeholder.classList.add('hidden');
             els.content.classList.add('hidden');
             els.loading.classList.remove('hidden');
@@ -257,14 +309,17 @@
         setStatus(text, kind);
     }
 
-    async function search({ isRetry = false } = {}) {
+    async function search({ isRetry = false, inPlace = false } = {}) {
         clearTimeout(retryTimer);
         if (!isRetry) retries = 0;
+        inPlace = inPlace && current !== null && !els.content.classList.contains('hidden');
 
         const s = collect();
         const problem = validate(s);
         if (problem) {
-            showMessage(problem, 'error');
+            keepCourt = null;
+            if (inPlace) setStatus(problem, 'error');
+            else showMessage(problem, 'error');
             return;
         }
         save(s);
@@ -281,9 +336,9 @@
         }
 
         if (!isRetry) {
-            setBusy(true, s.mode === 'now'
-                ? 'Checking what is being served right now.'
-                : 'Building the best plate.');
+            setBusy(true, inPlace ? 'Rebuilding the plate.'
+                : s.mode === 'now' ? 'Checking what is being served right now.'
+                    : 'Building the best plate.', { inPlace });
         }
 
         let res;
@@ -291,6 +346,7 @@
             res = await postJSON('/api/find_meal', payload);
         } catch (err) {
             setBusy(false);
+            keepCourt = null;
             showMessage(err && err.name === 'TimeoutError'
                 ? 'The request timed out. Try again.'
                 : 'Could not reach the server. Check your connection and try again.', 'error');
@@ -301,17 +357,28 @@
         if (res.status === 503 && retries < MAX_RETRIES) {
             retries += 1;
             setStatus(`Loading menus from Purdue Dining (try ${retries} of ${MAX_RETRIES}).`, 'warn');
-            retryTimer = setTimeout(() => search({ isRetry: true }), RETRY_DELAY_MS);
+            retryTimer = setTimeout(() => search({ isRetry: true, inPlace }), RETRY_DELAY_MS);
             return;
         }
 
         setBusy(false);
-        if (res.status === 429) {
+        const court = keepCourt;
+        keepCourt = null;
+        if (inPlace && (!res.ok || !res.data)) {
+            // A swap that leaves nothing to eat: keep the plate on screen and
+            // undo the change rather than blanking the results.
+            setExclusions(current.exclude || []);
+            save(collect());
+            const reason = res.status === 429
+                ? 'Too many requests. Wait a minute and try again.'
+                : (res.data && res.data.error) || `Something went wrong (status ${res.status}).`;
+            setStatus(`${reason.replace(/\.$/, '')}. Your plate is unchanged.`, 'error');
+        } else if (res.status === 429) {
             showMessage('Too many requests. Wait a minute and try again.', 'error');
         } else if (!res.ok || !res.data) {
             const reason = (res.data && res.data.error) || `Something went wrong (status ${res.status}). Try again.`;
             showMessage(reason, 'error');
-        } else if (res.data.currently_serving === false) {
+        } else if (res.data.currently_serving === false && !res.data.upcoming) {
             const hint = (res.data.next_meal_hint || '').replace(/\.+$/, '');
             // "Dining courts are closed until tomorrow" already says it all;
             // "Dinner starts at 5 pm" needs the lead-in.
@@ -321,12 +388,17 @@
             showMessage(text, 'warn', { offerPlan: true });
             revealResults();
         } else {
-            current = res.data;
-            selected = 0;
+            current = { ...res.data, exclude: s.exclude };
+            const same = court ? (current.options || []).findIndex((o) => o.court === court) : -1;
+            selected = Math.max(0, same);
             render();
-            const where = current.court + (current.currently_serving ? ', serving now' : '');
-            setStatus(`Found a plate at ${where}.`, 'ok');
-            revealResults();
+            const option = currentOption();
+            if (current.upcoming) {
+                setStatus(`Found a plate for the next meal, at ${option.court}.`, 'ok');
+            } else {
+                setStatus(`Found a plate at ${option.court}${current.currently_serving ? ', serving now' : ''}.`, 'ok');
+            }
+            if (!inPlace) revealResults();
         }
     }
 
@@ -341,18 +413,27 @@
     // --- rendering ---
 
     function render() {
-        const option = (current.options && current.options[selected]) || current;
+        const option = currentOption();
         const dateLabel = current.date ? formatDateLabel(current.date) : '';
 
         if (current.currently_serving) {
             els.header.textContent = 'Your meal right now';
+        } else if (current.upcoming) {
+            els.header.textContent = dateLabel === 'today' ? 'Your next meal' : `Your next meal, ${dateLabel}`;
         } else {
             els.header.textContent = dateLabel ? `Your meal for ${dateLabel}` : 'Your meal';
         }
+        const hint = (current.next_meal_hint || '').replace(/\.+$/, '');
+        els.note.textContent = current.upcoming
+            ? `Nothing is being served right now.${hint ? ` ${hint}.` : ''}`
+            : '';
+        els.note.classList.toggle('hidden', !current.upcoming);
         renderWhere(els.where, option);
         renderMatch(option.totals, current.targets);
         renderTotals(option.totals, current.targets);
+        renderExtraNutrition(option.totals);
         renderItems(option.plan);
+        renderLeftOff(current.exclude || []);
         renderChart(option.totals);
         renderOptions();
         renderFreshness(current.menu_updated);
@@ -406,10 +487,38 @@
             els.totals.appendChild(tr);
         };
         // Plate calories come from Purdue's labels; a target has none, so
-        // estimate it at 4/4/9 kcal per gram.
-        const estimate = (m) => Math.round(4 * (m.p || 0) + 4 * (m.c || 0) + 9 * (m.f || 0));
-        addRow('Plate', totals, String(totals.cal != null ? Math.round(totals.cal) : estimate(totals)));
-        if (targets) addRow('Target', targets, `~${estimate(targets)}`, 'target-row');
+        // estimate it from its macros.
+        addRow('Plate', totals, String(totals.cal != null ? Math.round(totals.cal) : estimateKcal(totals)));
+        if (targets) addRow('Target', targets, `~${estimateKcal(targets)}`, 'target-row');
+    }
+
+    // Reported, not optimized: "Also 9 g fiber · 21 g sugar · ...".
+    function renderExtraNutrition(totals) {
+        const parts = [
+            ['fiber', (v) => `${grams(v)} fiber`],
+            ['sugar', (v) => `${grams(v)} sugar`],
+            ['sat_fat', (v) => `${grams(v)} saturated fat`],
+            ['sodium', (v) => `${Math.round(v).toLocaleString()} mg sodium`],
+        ].filter(([key]) => totals[key] != null).map(([key, format]) => format(totals[key]));
+        els.nutritionExtra.textContent = parts.length ? `Also ${parts.join(' · ')}` : '';
+    }
+
+    // Foods being left off, each with a button to put it back.
+    function renderLeftOff(terms) {
+        els.leftOffList.textContent = '';
+        els.leftOff.classList.toggle('hidden', terms.length === 0);
+        terms.forEach((term) => {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'chip';
+            btn.textContent = term;
+            btn.title = 'Put it back';
+            btn.setAttribute('aria-label', `Put ${term} back`);
+            btn.addEventListener('click', () => putBack(term));
+            li.appendChild(btn);
+            els.leftOffList.appendChild(li);
+        });
     }
 
     // Purdue's serving labels are free text: "1/2 Cup Serving", "Slice",
@@ -446,7 +555,16 @@
             const size = servingLabel(item.serving_size);
             detail.textContent = [item.station, size].filter(Boolean).join(' · ');
             info.append(name, detail);
+            const allergens = ALLERGENS.filter((a) => (item.traits || []).includes(a));
+            if (allergens.length) {
+                const contains = document.createElement('p');
+                contains.className = 'item-contains';
+                contains.textContent = `Contains ${allergens.map((a) => a.toLowerCase()).join(', ')}`;
+                info.appendChild(contains);
+            }
 
+            const side = document.createElement('div');
+            side.className = 'item-side';
             const macros = document.createElement('div');
             macros.className = 'item-macros';
             [['p', 'P'], ['c', 'C'], ['f', 'F']].forEach(([key, letter]) => {
@@ -454,8 +572,17 @@
                 span.textContent = `${letter} ${grams((item[key] || 0) * servings)}`;
                 macros.appendChild(span);
             });
+            const swap = document.createElement('button');
+            swap.type = 'button';
+            swap.className = 'swap-button';
+            swap.textContent = 'Not this';
+            // Starts with the visible text, so voice control ("click Not this") works.
+            swap.setAttribute('aria-label', `Not this: ${item.name}`);
+            swap.title = 'Leave this off and rebuild the plate';
+            swap.addEventListener('click', () => leaveOff(item.name));
+            side.append(macros, swap);
 
-            row.append(info, macros);
+            row.append(info, side);
             els.items.appendChild(row);
         });
     }
@@ -599,9 +726,11 @@
 
     els.share.addEventListener('click', copyLink);
 
+    [els.protein, els.carbs, els.fat].forEach((input) => input.addEventListener('input', updateKcal));
+
     // Redraw the chart in the new palette when the system theme changes.
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-        if (current) renderChart(((current.options || [])[selected] || current).totals);
+        if (current) renderChart(currentOption().totals);
     });
 
     // --- start ---
@@ -611,6 +740,9 @@
     const fromLink = fromQuery(location.search);
     apply(fromLink || loadSaved() || DEFAULTS);
     if (fromLink) {
+        // The search saves these settings; a reload should keep any changes
+        // made afterwards rather than re-apply the link.
+        history.replaceState(null, '', location.pathname);
         search();
     } else {
         setStatus(mode === 'now'

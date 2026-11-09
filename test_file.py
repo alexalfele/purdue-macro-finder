@@ -416,6 +416,30 @@ class TestFindMealEndpoint(unittest.TestCase):
     def test_unknown_mode_is_400(self):
         self.assertEqual(self._post_with(mode="later").status_code, 400)
 
+    def test_allergen_filters_are_accepted(self):
+        filters = {"No Milk": True, "No Tree Nuts": True, "Vegan": False, "No Gluten": True}
+        self.assertEqual(self._post_with(dietary_filters=filters).status_code, 200)
+
+    def test_unknown_or_non_boolean_filters_are_400(self):
+        # A typo like "No Nuts" would otherwise silently filter nothing.
+        resp = self._post_with(dietary_filters={"No Nuts": True})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("No Nuts", resp.get_json()["error"])
+        self.assertEqual(self._post_with(dietary_filters={"Vegan": "yes"}).status_code, 400)
+
+    def test_now_mode_retries_while_tomorrows_menu_loads(self):
+        self.stub.loaded = True
+        self.stub.find_meal_now = lambda *a, **kw: {"loading": True}
+        payload = {"mode": "now", "targets": {"p": 40, "c": 60, "f": 20}}
+        self.assertEqual(self.client.post("/api/find_meal", json=payload).status_code, 503)
+
+    def test_now_mode_with_nothing_that_fits_is_404(self):
+        self.stub.loaded = True
+        self.stub.find_meal_now = lambda *a, **kw: None
+        resp = self.client.post("/api/find_meal", json={"mode": "now", "targets": {"p": 40, "c": 60, "f": 20}})
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("filters", resp.get_json()["error"])
+
     def test_featured_endpoint_is_gone(self):
         # Replaced by mode "now", which uses the visitor's own targets.
         self.assertEqual(self.client.get("/api/featured").status_code, 404)
@@ -549,6 +573,29 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertLess(len(zipped.get_data()), len(plain.get_data()) / 2)
         self.assertIn("javascript", zipped.headers["Content-Type"])
 
+    def test_installable_app_manifest_and_icons(self):
+        import json
+        html = self.client.get("/").get_data(as_text=True)
+        for needle in ('rel="manifest"', 'rel="apple-touch-icon"', 'rel="icon"'):
+            self.assertIn(needle, html)
+        resp = self.client.get("/static/manifest.webmanifest")
+        self.assertTrue(resp.headers["Content-Type"].startswith("application/manifest+json"))
+        manifest = json.loads(resp.get_data())
+        self.assertEqual(manifest["start_url"], "/")
+        for icon in manifest["icons"]:
+            png = self.client.get(icon["src"], headers={"Accept-Encoding": "gzip"})
+            self.assertEqual(png.status_code, 200, icon["src"])
+            self.assertEqual(png.headers["Content-Type"], "image/png")  # no charset
+            self.assertIsNone(png.headers.get("Content-Encoding"))  # already compressed
+            self.assertTrue(png.get_data().startswith(b"\x89PNG"))
+        svg = self.client.get("/static/favicon.svg")
+        self.assertTrue(svg.headers["Content-Type"].startswith("image/svg+xml"))
+
+    def test_unversioned_static_urls_are_not_cached_forever(self):
+        # The manifest names its icons without ?v=, so a new icon must still land.
+        self.assertNotIn("immutable", self.client.get("/static/icon-192.png").headers["Cache-Control"])
+        self.assertIn("immutable", self.client.get("/static/icon-192.png?v=abc").headers["Cache-Control"])
+
     def test_only_allow_listed_static_files(self):
         for path in ("/static/app.py", "/static/.env", "/static/..%2Fapp.py", "/static/"):
             self.assertEqual(self.client.get(path).status_code, 404, path)
@@ -625,6 +672,18 @@ class TestMenuParsing(unittest.TestCase):
         foods, _ = self._parse([_meal("Lunch", [_appearance("Chicken", p=27.8029, c=0.4, f=3.2)])])
         self.assertAlmostEqual(foods[0]["p"], 27.8)
 
+    def test_fiber_sugar_saturated_fat_and_sodium_are_parsed(self):
+        food = _appearance("Black Beans", p=7, c=20, f=0.5)
+        food["item"]["nutritionFacts"] += [
+            {"name": "Dietary Fiber", "value": 7.4, "label": "7g"},
+            {"name": "Sugar", "value": 0.5316, "label": "less than 1 g"},
+            {"name": "Saturated fat", "value": 0.1, "label": "0g"},
+            {"name": "Sodium", "value": None, "label": "380mg"},
+        ]
+        foods, _ = self._parse([_meal("Lunch", [food])])
+        self.assertEqual({k: foods[0][k] for k in ("fiber", "sugar", "sat_fat", "sodium")},
+                         {"fiber": 7.4, "sugar": 0.5, "sat_fat": 0.1, "sodium": 380.0})
+
     def test_label_used_when_value_missing(self):
         foods, _ = self._parse([_meal("Lunch", [_appearance("Chicken", p=28, c=1, f=3, label_only=True)])])
         self.assertEqual(foods[0]["p"], 28.0)
@@ -653,6 +712,28 @@ class TestDietaryFilters(unittest.TestCase):
 
     def test_vegan_requires_vegan(self):
         self.assertFalse(MealFinder._passes_filters({"traits": ["Vegetarian"]}, {"Vegan": True}))
+
+    def test_each_allergen_filter_drops_its_traits_only(self):
+        for name, traits in Config.AVOID_FILTERS.items():
+            for trait in traits:
+                self.assertFalse(MealFinder._passes_filters({"traits": [trait]}, {name: True}), name)
+            self.assertTrue(MealFinder._passes_filters({"traits": ["Vegetarian"]}, {name: True}), name)
+
+    def test_filters_combine(self):
+        filters = {"No Milk": True, "No Peanuts": True, "Vegetarian": True}
+        self.assertTrue(MealFinder._passes_filters({"traits": ["Vegetarian", "Soy"]}, filters))
+        self.assertFalse(MealFinder._passes_filters({"traits": ["Vegetarian", "Peanuts"]}, filters))
+        self.assertFalse(MealFinder._passes_filters({"traits": ["Vegetarian", "Milk"]}, filters))
+
+    def test_false_filter_is_ignored(self):
+        self.assertTrue(MealFinder._passes_filters({"traits": ["Milk"]}, {"No Milk": False}))
+
+    def test_avoid_filters_cover_purdues_allergen_tags(self):
+        # The tags Purdue's API uses (from a real day's menu).
+        purdue = {"Soy", "Milk", "Gluten", "Wheat", "Eggs", "Sesame", "Coconut",
+                  "Peanuts", "Tree Nuts", "Fish", "Shellfish"}
+        covered = {t for traits in Config.AVOID_FILTERS.values() for t in traits}
+        self.assertLessEqual(purdue, covered)
 
 
 class TestPlateRules(unittest.TestCase):
@@ -732,6 +813,38 @@ class TestPlateRules(unittest.TestCase):
     def test_numeric_string_targets_do_not_crash(self):
         # validate_targets accepts "40"; the engine then subtracted a string.
         self.assertIsNotNone(self._find(targets={"p": "40", "c": "60", "f": "20"}))
+
+    def test_same_search_gives_the_same_plate(self):
+        # Near-ties used to flip between searches, so searching twice, or
+        # opening a shared link, could show a different plate.
+        rng = random.Random(7)
+        with self.finder.data_lock:
+            self.finder.menu_by_date[self.date_str]["master"].extend(
+                _food(f"Food {i}", "Lunch", round(rng.uniform(0, 25), 1),
+                      round(rng.uniform(0, 40), 1), round(rng.uniform(0, 15), 1))
+                for i in range(30)
+            )
+        plate = lambda result: [(i["name"], i["servings"]) for i in result["plan"]]
+        first = self._find(meals=("Lunch",))
+        for _ in range(5):
+            self.assertEqual(plate(self._find(meals=("Lunch",))), plate(first))
+        other = MealFinder()  # another server process
+        other.menu_by_date = self.finder.menu_by_date
+        other.ensure_loaded = lambda *a, **kw: None
+        again = other.find_best_meal({"p": 40, "c": 60, "f": 20}, ["Lunch"], [], {}, date_str=self.date_str)
+        self.assertEqual(plate(again), plate(first))
+
+    def test_totals_include_fiber_sugar_saturated_fat_and_sodium(self):
+        with self.finder.data_lock:
+            for item in self.finder.menu_by_date[self.date_str]["master"]:
+                item.update(fiber=2.5, sugar=4.0, sat_fat=1.0, sodium=210.4)
+        result = self._find(meals=("Lunch",))
+        servings = sum(i["servings"] for i in result["plan"])
+        totals = result["totals"]
+        self.assertAlmostEqual(totals["fiber"], 2.5 * servings)
+        self.assertAlmostEqual(totals["sugar"], 4.0 * servings)
+        self.assertAlmostEqual(totals["sat_fat"], 1.0 * servings)
+        self.assertEqual(totals["sodium"], round(210.4 * servings))
 
 
 class TestOptimizer(unittest.TestCase):
@@ -850,9 +963,29 @@ class TestMealNow(unittest.TestCase):
         with self.finder.data_lock:
             self.finder.menu_by_date[self.date_str] = {"master": master, "hours": hours}
         self.finder.ensure_loaded = lambda *a, **kw: None
+        self.async_loads = []
+        self.finder.ensure_loaded_async = self.async_loads.append
+        self.tomorrow = (self.day + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    def _at(self, hour, minute=0):
-        return datetime.combine(self.day, time(hour, minute), tzinfo=PURDUE_TZ)
+    def _at(self, hour, minute=0, day=None):
+        return datetime.combine(day or self.day, time(hour, minute), tzinfo=PURDUE_TZ)
+
+    def _add_tomorrow(self, hours=True):
+        """Tomorrow's menu: Wiley breakfast at 7, Ford brunch at 10."""
+        day = self.day + timedelta(days=1)
+        master = [
+            _food("Scrambled Eggs", "Breakfast", 12, 2, 10),
+            _food("Pancakes", "Breakfast", 6, 45, 8),
+            _food("Turkey Sausage", "Breakfast", 14, 1, 6),
+            _food("Omelet", "Brunch", 20, 4, 14, court="Ford"),
+            _food("Hash Browns", "Brunch", 3, 30, 9, court="Ford"),
+        ]
+        times = {
+            ("Wiley", "Breakfast"): {"start": self._at(7, day=day), "end": self._at(10, day=day), "status": "OPEN"},
+            ("Ford", "Brunch"): {"start": self._at(10, day=day), "end": self._at(14, day=day), "status": "OPEN"},
+        }
+        with self.finder.data_lock:
+            self.finder.menu_by_date[self.tomorrow] = {"master": master, "hours": times if hours else {}}
 
     def _now(self, at, **kw):
         return self.finder.find_meal_now({"p": 40, "c": 50, "f": 10}, now=at, **kw)
@@ -876,15 +1009,55 @@ class TestMealNow(unittest.TestCase):
         result = self._now(self._at(18), dietary_filters={"Vegan": True})
         self.assertIsNone(result)  # one vegan food can't make a 2-item plate
 
-    def test_between_meals_points_to_next_opening(self):
+    def test_between_meals_plans_the_next_meal(self):
+        # Instead of a dead end, show what to eat when dinner opens.
         result = self._now(self._at(15))
         self.assertFalse(result["currently_serving"])
+        self.assertTrue(result["upcoming"])
         self.assertEqual(result["next_meal_hint"], "Dinner starts at 5 pm")
+        self.assertEqual(result["meal_name"], "Dinner")
+        self.assertEqual({o["court"] for o in result["options"]}, {"Wiley", "Earhart"})
+        self.assertEqual(result["date"], self.date_str)
 
-    def test_after_last_meal(self):
+    def test_next_meal_is_the_one_starting_soonest(self):
+        # At 10:30 Ford's lunch at 11 is next; dinner at 5 elsewhere is too
+        # far off to count, even if it would score better.
+        result = self._now(self._at(10, 30))
+        self.assertEqual({(o["court"], o["meal_name"]) for o in result["options"]}, {("Ford", "Lunch")})
+        self.assertEqual(result["next_meal_hint"], "Lunch starts at 11 am")
+
+    def test_meals_starting_close_together_are_both_offered(self):
+        with self.finder.data_lock:
+            self.finder.menu_by_date[self.date_str]["hours"][("Wiley", "Dinner")]["start"] = self._at(16, 30)
+        result = self._now(self._at(15))
+        self.assertEqual({o["court"] for o in result["options"]}, {"Wiley", "Earhart"})
+        self.assertEqual(result["next_meal_hint"], "Dinner starts at 4:30 pm")
+
+    def test_after_last_meal_loads_tomorrow_first(self):
+        # Tomorrow's menu isn't in memory: start loading it and ask the
+        # client to retry (the API turns this into a 503).
+        self.assertEqual(self._now(self._at(22)), {"loading": True})
+        self.assertEqual(self.async_loads, [self.tomorrow])
+
+    def test_after_last_meal_plans_tomorrows_breakfast(self):
+        self._add_tomorrow()
+        result = self._now(self._at(22))
+        self.assertTrue(result["upcoming"])
+        self.assertEqual(result["date"], self.tomorrow)
+        # Ford's brunch at 10 is hours after breakfast, so it isn't "next".
+        self.assertEqual({(o["court"], o["meal_name"]) for o in result["options"]},
+                         {("Wiley", "Breakfast")})
+        self.assertEqual(result["next_meal_hint"], "Breakfast starts at 7 am tomorrow")
+
+    def test_without_published_hours_falls_back_to_the_closed_hint(self):
+        self._add_tomorrow(hours=False)
         result = self._now(self._at(22))
         self.assertFalse(result["currently_serving"])
+        self.assertNotIn("upcoming", result)
         self.assertIn("tomorrow", result["next_meal_hint"])
+
+    def test_next_meal_respects_filters(self):
+        self.assertIsNone(self._now(self._at(15), dietary_filters={"Vegan": True}))
 
     def test_server_clock_in_utc_still_uses_purdue_time(self):
         # Regression: Render runs on UTC, so at 6 pm Purdue time the server's

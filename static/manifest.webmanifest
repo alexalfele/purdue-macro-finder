@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "Purdue Macro Finder",
+  "short_name": "Macro Finder",
+  "description": "Build a Purdue dining court plate that hits your protein, carb, and fat targets, and see where and when to get it.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f2efe6",
+  "theme_color": "#f2efe6",
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

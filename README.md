@@ -6,7 +6,10 @@ targets, from what is actually on the menu, and tells you where and when to get 
 ## What it does
 
 - **Right now or plan ahead.** Search the meals being served at this moment (using each
-  dining court's posted hours), or pick a date and meal periods.
+  dining court's posted hours), or pick a date and meal periods. When nothing is open,
+  Right now plans the next meal instead (breakfast tomorrow, after dinner closes).
+- **Swap anything.** "Not this" on any item leaves that food off and rebuilds the plate at
+  the same dining court; the foods left off show as chips you can tap to put back.
 - **Every station, not just entrées.** Salad bars, deli bars, pasta and pizza bars, stir-fry
   and taco stations list their foods as components; those are all searchable, labelled with
   the station they're served at.
@@ -14,11 +17,17 @@ targets, from what is actually on the menu, and tells you where and when to get 
   shows the best plate at every other dining court too, so you can pick the closest one.
 - **Realistic plates.** One meal period at one court per plate, up to five servings, at most
   two of any one food (how 60 g+ protein targets become reachable).
-- **Dietary filters and exclusions.** Vegetarian, vegan, and gluten-free (excludes anything
-  Purdue tags with gluten or wheat), plus a free-text list of foods to skip.
+- **Diet and allergen filters.** Vegetarian and vegan, and avoid gluten/wheat, milk, eggs,
+  soy, peanuts, tree nuts, fish, shellfish, sesame, or coconut, using Purdue's allergen
+  tags. Each item lists what it contains. Plus a free-text list of foods to skip.
+- **More than macros.** Live calorie estimate for your targets; each plate also reports
+  fiber, sugar, saturated fat, and sodium.
+- **Consistent.** The same search always returns the same plate, so a shared link shows
+  exactly what the sender saw.
 - **Remembers you, privately.** Settings are kept in your browser's local storage, and
   Copy link makes a shareable URL of the current search. Nothing is stored server-side.
-- Works on phones, follows the system light/dark setting, and keyboard-accessible.
+- Installable to a phone's home screen, works on phones, follows the system light/dark
+  setting, and keyboard-accessible.
 
 ## How it works
 
@@ -85,7 +94,7 @@ app.py                 Flask app: routes, validation, headers, static serving
 meal_finder_engine.py  Menu fetching/caching, optimizer, "right now" logic
 config.py              Tunables: weights, limits, cache TTLs, time zone, courts
 index.html             Main page (markup only)
-static/                app.js, app.css, legal.css, chart.umd.min.js
+static/                app.js, app.css, legal.css, chart.umd.min.js, manifest and icons
 terms.html, privacy.html
 test_file.py           Unit and HTTP tests
 render.yaml, Procfile  Deployment

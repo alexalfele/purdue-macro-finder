@@ -8,6 +8,11 @@
     <meta name="theme-color" content="#161513" media="(prefers-color-scheme: dark)">
     <title>Purdue Macro Finder</title>
 
+    <link rel="icon" href="/static/favicon.svg?v=__ASSET_VERSION__" type="image/svg+xml">
+    <link rel="icon" href="/static/icon-192.png?v=__ASSET_VERSION__" type="image/png" sizes="192x192">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=__ASSET_VERSION__">
+    <link rel="manifest" href="/static/manifest.webmanifest?v=__ASSET_VERSION__">
+    <meta name="apple-mobile-web-app-title" content="Macro Finder">
     <link rel="stylesheet" href="/static/app.css?v=__ASSET_VERSION__">
     <!-- Chart.js 4.6.1 (MIT), self-hosted so no third party sees visitors and
          the CSP can allow scripts from this origin only. -->
@@ -76,14 +81,34 @@
                             <input type="number" id="target-fat" value="20" min="0" max="500" step="any" inputmode="decimal">
                         </div>
                     </div>
+                    <p id="target-kcal" class="muted-small kcal-estimate" aria-live="polite"></p>
                 </details>
 
                 <details class="field-group" open>
-                    <summary>Dietary filters</summary>
-                    <div class="filters">
-                        <label><input type="checkbox" data-filter="Vegetarian"> Vegetarian</label>
-                        <label><input type="checkbox" data-filter="Vegan"> Vegan</label>
-                        <label><input type="checkbox" data-filter="No Gluten"> No gluten</label>
+                    <summary>Diet and allergens</summary>
+                    <div>
+                        <fieldset class="filters">
+                            <legend>Diet</legend>
+                            <label><input type="checkbox" data-filter="Vegetarian"> Vegetarian</label>
+                            <label><input type="checkbox" data-filter="Vegan"> Vegan</label>
+                        </fieldset>
+                        <fieldset class="filters avoid-grid">
+                            <legend>Avoid</legend>
+                            <label><input type="checkbox" data-filter="No Gluten"> Gluten and wheat</label>
+                            <label><input type="checkbox" data-filter="No Milk"> Milk</label>
+                            <label><input type="checkbox" data-filter="No Eggs"> Eggs</label>
+                            <label><input type="checkbox" data-filter="No Soy"> Soy</label>
+                            <label><input type="checkbox" data-filter="No Peanuts"> Peanuts</label>
+                            <label><input type="checkbox" data-filter="No Tree Nuts"> Tree nuts</label>
+                            <label><input type="checkbox" data-filter="No Fish"> Fish</label>
+                            <label><input type="checkbox" data-filter="No Shellfish"> Shellfish</label>
+                            <label><input type="checkbox" data-filter="No Sesame"> Sesame</label>
+                            <label><input type="checkbox" data-filter="No Coconut"> Coconut</label>
+                        </fieldset>
+                        <p class="muted-small help-text">
+                            Uses Purdue's allergen labels, which can be incomplete. If an allergy
+                            is serious, confirm with dining court staff.
+                        </p>
                     </div>
                 </details>
 
@@ -128,6 +153,7 @@
 
                 <div id="results-content" class="hidden">
                     <h2 id="result-header" tabindex="-1">Your meal</h2>
+                    <p id="result-note" class="result-note hidden"></p>
                     <p id="result-where" class="result-where"></p>
                     <p id="result-match" class="match"></p>
 
@@ -145,11 +171,16 @@
                             </thead>
                             <tbody id="totals-body"></tbody>
                         </table>
+                        <p id="nutrition-extra" class="nutrition-extra"></p>
                     </div>
 
                     <div class="section">
                         <h3>Items</h3>
                         <div id="meal-plan-items" role="list"></div>
+                        <div id="left-off" class="left-off hidden">
+                            <span class="left-off-label">Left off:</span>
+                            <ul id="left-off-list"></ul>
+                        </div>
                     </div>
 
                     <div class="section" id="chart-section">

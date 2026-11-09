@@ -1,4 +1,5 @@
 import bisect
+import hashlib
 import threading
 import requests
 import json
@@ -31,11 +32,9 @@ _FALLBACK_HOURS = [
     ("Dinner", 17, 21, False),
 ]
 
-# Traits that mean an item is not gluten-free. Purdue tags gluten as "Gluten"
-# and wheat separately as "Wheat"; wheat always contains gluten.
-_GLUTEN_TRAITS = {"Gluten", "Wheat", "Contains Gluten"}
-
 _MACRO_FACTS = {"Protein": "p", "Total Carbohydrate": "c", "Total fat": "f", "Calories": "cal"}
+# Reported for each plate but not optimized. Sodium is in mg, the rest in g.
+_EXTRA_FACTS = {"Dietary Fiber": "fiber", "Sugar": "sugar", "Saturated fat": "sat_fat", "Sodium": "sodium"}
 
 
 def _format_clock(hour, minute=0):
@@ -301,11 +300,14 @@ class MealFinder:
             return None
 
         food = {"p": 0.0, "c": 0.0, "f": 0.0, "cal": 0.0}
+        food.update(dict.fromkeys(_EXTRA_FACTS.values(), 0.0))
         serving_size = ""
         for fact in facts:
             name = fact.get("name")
             if name in _MACRO_FACTS:
                 food[_MACRO_FACTS[name]] = self._nutrient(fact)
+            elif name in _EXTRA_FACTS:
+                food[_EXTRA_FACTS[name]] = self._nutrient(fact)
             elif name == "Serving Size":
                 serving_size = fact.get("label") or ""
 
@@ -612,6 +614,9 @@ class MealFinder:
             "f": round(sum(F[i] for i in best_plate), 1),
             "cal": round(sum(cal[i] for i in best_plate)),
         }
+        for key in _EXTRA_FACTS.values():
+            total = sum(float(items[i].get(key) or 0) for i in best_plate)
+            totals[key] = round(total) if key == "sodium" else round(total, 1)
         return plan, best_score, totals
 
     @staticmethod
@@ -867,8 +872,9 @@ class MealFinder:
             return False
         if dietary_filters.get("Vegetarian") and not traits & {"Vegetarian", "Vegan"}:
             return False
-        if dietary_filters.get("No Gluten") and traits & _GLUTEN_TRAITS:
-            return False
+        for name, avoided in Config.AVOID_FILTERS.items():
+            if dietary_filters.get(name) and traits.intersection(avoided):
+                return False
         return True
 
     def _hours_for(self, snapshot, court, meal_name):
@@ -902,6 +908,16 @@ class MealFinder:
             pools.setdefault(key, []).append(item)
         return pools
 
+    @staticmethod
+    def _search_rng(date_str, court, meal_name, targets, pool):
+        """A random source seeded by the search itself, so the same targets,
+        filters and menu always give the same plate: searching twice doesn't
+        flip between near-ties, and a shared link shows what the sender saw.
+        The pool's food names stand in for the filters and exclusions."""
+        key = json.dumps([date_str, court, meal_name, [targets[k] for k in ("p", "c", "f")],
+                          [item.get("name") for item in pool]])
+        return random.Random(hashlib.sha256(key.encode("utf-8")).digest())
+
     def _plan_from_pools(self, snapshot, pools, targets, date_str):
         """Optimize every pool. Returns the best plate, plus an `options` list
         holding the best plate at each dining court (best first), or None.
@@ -913,7 +929,8 @@ class MealFinder:
         best_by_court = {}
         for (court, meal_name), pool in pools.items():
             plan, score, totals = self._optimize_pool(
-                pool, targets, Config.WEIGHTS, Config.PENALTIES
+                pool, targets, Config.WEIGHTS, Config.PENALTIES,
+                rng=self._search_rng(date_str, court, meal_name, targets, pool),
             )
             if not plan:
                 continue
@@ -964,9 +981,9 @@ class MealFinder:
             dietary_filters or {}, exclusion_list,
         )
         if not pools:
-            logger.warning(
-                f"No food fits date={date_str} meals={sorted(wanted)} filters={dietary_filters}"
-            )
+            # Visitors' filters stay out of the logs: allergen choices are
+            # health information, and the privacy policy says inputs aren't kept.
+            logger.info(f"No food fits a search for {date_str} {sorted(wanted)}")
             return None
         return self._plan_from_pools(snapshot, pools, targets, date_str)
 
@@ -974,9 +991,9 @@ class MealFinder:
         """Best plate from the meals being served right now, by Purdue's
         published per-court hours.
 
-        Returns {"currently_serving": False, "next_meal_hint": ...} when nothing
-        is open, None when meals are open but no food passes the filters, and
-        otherwise the same payload as find_best_meal with currently_serving=True.
+        Returns the same payload as find_best_meal with currently_serving=True,
+        or None when no food passes the filters. When nothing is open it plans
+        the next meal instead (see _plan_next_meal).
         """
         targets = self._coerce_targets(targets)
         now = self._as_purdue_time(now) if now is not None else self._now()
@@ -994,7 +1011,7 @@ class MealFinder:
 
         open_pairs, hint = self._open_meals(items, snapshot.get("hours") or {}, now)
         if not open_pairs:
-            return {"currently_serving": False, "next_meal_hint": hint, "date": date_str}
+            return self._plan_next_meal(now, targets, exclusion_list, dietary_filters, hint)
 
         pools = self._build_pools(
             items, lambda court, meal: (court, meal) in open_pairs,
@@ -1004,6 +1021,62 @@ class MealFinder:
         if result is not None:
             result["currently_serving"] = True
         return result
+
+    def _plan_next_meal(self, now, targets, exclusion_list, dietary_filters, hint):
+        """When nothing is open, plan the next meal instead: the meals starting
+        soonest (within Config.NEXT_MEAL_WINDOW_MINUTES of the first opening),
+        later today if any are still to come, otherwise tomorrow.
+
+        Returns the plan with currently_serving=False and upcoming=True; None
+        when no food passes the filters; {"loading": True} while tomorrow's
+        menu is still being fetched; or just the closed hint when Purdue's
+        hours aren't known.
+        """
+        today = now.strftime("%Y-%m-%d")
+        closed = {"currently_serving": False, "next_meal_hint": hint, "date": today}
+        for days_ahead in (0, 1):
+            date_str = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+            if days_ahead:
+                if not self.has_data(date_str):
+                    self.ensure_loaded_async(date_str)
+                    return {"loading": True}
+                self.ensure_loaded(date_str)  # refreshes a stale copy in the background
+            snapshot = self._get_snapshot(date_str) or {}
+            upcoming = self._upcoming_meals(snapshot, now)
+            if not upcoming:
+                continue
+            start, meal = min((start, key[1]) for key, start in upcoming.items())
+            cutoff = start + timedelta(minutes=Config.NEXT_MEAL_WINDOW_MINUTES)
+            upcoming = {key: s for key, s in upcoming.items() if s <= cutoff}
+            next_hint = f"{meal} starts at {_format_clock(start.hour, start.minute)}"
+            pools = self._build_pools(
+                snapshot.get("master") or [], lambda court, meal_name: (court, meal_name) in upcoming,
+                dietary_filters or {}, exclusion_list,
+            )
+            result = self._plan_from_pools(snapshot, pools, targets, date_str) if pools else None
+            if result is not None:
+                result.update(
+                    currently_serving=False, upcoming=True,
+                    next_meal_hint=next_hint + (" tomorrow" if days_ahead else ""),
+                )
+            return result
+        return closed
+
+    @staticmethod
+    def _upcoming_meals(snapshot, after):
+        """Each dining court's first meal starting after `after`, by Purdue's
+        published hours: {(court, meal): start}. Empty if hours are unknown."""
+        pairs = {(item["court"], item["meal_name"]) for item in snapshot.get("master") or []}
+        first = {}
+        for key, h in (snapshot.get("hours") or {}).items():
+            start = h.get("start")
+            if (key not in pairs or not start or not h.get("end")
+                    or h.get("status") == "CLOSED" or start <= after):
+                continue
+            court = key[0]
+            if court not in first or start < first[court][1]:
+                first[court] = (key, start)
+        return dict(first.values())
 
     # --- what's open when ---
 

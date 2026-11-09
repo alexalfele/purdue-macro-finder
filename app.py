@@ -21,7 +21,14 @@ ENV_FILE = os.path.join(APP_ROOT, ".env")
 
 # The only static files served. Everything else in the project directory
 # (source, .env, caches) stays unreachable over HTTP.
-STATIC_FILES = {"app.css", "app.js", "legal.css", "chart.umd.min.js"}
+STATIC_FILES = {
+    "app.css", "app.js", "legal.css", "chart.umd.min.js",
+    "manifest.webmanifest", "favicon.svg", "icon-192.png", "icon-512.png",
+    "apple-touch-icon.png",
+}
+# Types Python's mimetypes may not know; text types get a charset.
+_CONTENT_TYPES = {".webmanifest": "application/manifest+json", ".svg": "image/svg+xml"}
+_TEXT_TYPES = ("text/", "application/javascript", "application/manifest+json", "image/svg+xml")
 
 
 def _load_dotenv(path):
@@ -192,10 +199,19 @@ def validate_meal_periods(meal_periods):
 
     return True, None
 
+DIETARY_FILTERS = frozenset(Config.DIET_FILTERS) | frozenset(Config.AVOID_FILTERS)
+
+
 def validate_dietary_filters(dietary_filters):
-    """Dietary filters must be an object like {"Vegan": true}."""
+    """Dietary filters must be an object like {"Vegan": true, "No Milk": true}
+    using only known filter names, so a typo can't silently filter nothing."""
     if not isinstance(dietary_filters, dict):
         return False, "Dietary filters must be an object."
+    for name, value in dietary_filters.items():
+        if name not in DIETARY_FILTERS:
+            return False, f"Unknown dietary filter: {str(name)[:40]}"
+        if not isinstance(value, bool):
+            return False, "Dietary filter values must be true or false."
     return True, None
 
 def validate_exclusion_list(exclusion_list):
@@ -228,12 +244,13 @@ def _accepts_gzip():
     return "gzip" in request.headers.get("Accept-Encoding", "").lower()
 
 
-def _respond(body, content_type, cache_control, gzipped=None):
+def _respond(body, content_type, cache_control, gzipped=None, compress=True):
     """Bytes response, gzip-compressed when the client accepts it.
 
-    `gzipped` lets callers pass a precomputed compressed body.
+    `gzipped` lets callers pass a precomputed compressed body; compress=False
+    sends already-compressed formats (PNG) as they are.
     """
-    if _accepts_gzip() and len(body) > 1024:
+    if compress and _accepts_gzip() and len(body) > 1024:
         resp = make_response(gzipped if gzipped is not None else gzip.compress(body))
         resp.headers["Content-Encoding"] = "gzip"
     else:
@@ -288,14 +305,20 @@ def privacy():
 @app.route("/static/<name>")
 @limiter.exempt
 def static_asset(name):
-    """Serves the allow-listed CSS/JS. URLs carry a content hash, so they can
-    be cached as immutable."""
+    """Serves the allow-listed files. Pages link them with a content hash
+    (?v=...), so those URLs are cached as immutable; bare URLs, such as the
+    icons a manifest names, are cached for a day so a redesign still lands."""
     if name not in STATIC_FILES:
         abort(404)
     raw, compressed = _static_bytes(name)
-    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
-    return _respond(raw, f"{mime}; charset=utf-8",
-                    "public, max-age=31536000, immutable", gzipped=compressed)
+    mime = (_CONTENT_TYPES.get(os.path.splitext(name)[1])
+            or mimetypes.guess_type(name)[0] or "application/octet-stream")
+    if mime.startswith(_TEXT_TYPES):
+        mime += "; charset=utf-8"
+    else:
+        compressed = None  # PNGs are already compressed
+    cache = "public, max-age=31536000, immutable" if "v" in request.args else "public, max-age=86400"
+    return _respond(raw, mime, cache, gzipped=compressed, compress=compressed is not None)
 
 @app.route("/api/health")
 @limiter.exempt
@@ -305,6 +328,12 @@ def health_check():
 
 
 # --- 7. API ENDPOINTS ---
+def _still_loading():
+    """503 tells the page to retry shortly while menus load in the background."""
+    return jsonify({"error": "Menu data is still loading, please retry in a few seconds."}), 503
+
+
+
 @app.route("/api/find_meal", methods=["POST"])
 @limiter.limit(limit_minute)
 @limiter.limit(limit_hour)
@@ -354,19 +383,19 @@ def api_find_meal():
         # client to retry.
         if not engine.has_data(date_str):
             engine.ensure_loaded_async(date_str)
-            return jsonify({
-                "error": "Menu data is still loading, please retry in a few seconds."
-            }), 503
+            return _still_loading()
 
         if mode == "now":
             result = engine.find_meal_now(targets, exclusion_list, dietary_filters)
             if result is None:
                 return jsonify({
                     "error": (
-                        "Dining courts are serving right now, but no food fits your "
-                        "dietary filters and exclusions. Try loosening them."
+                        "No food on the menu fits your dietary filters and "
+                        "exclusions. Try loosening them."
                     )
                 }), 404
+            if result.get("loading"):  # nothing open; tomorrow's menu is loading
+                return _still_loading()
             return jsonify(result)
 
         result = engine.find_best_meal(
