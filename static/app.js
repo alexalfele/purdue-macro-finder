@@ -412,6 +412,15 @@
         if (targets) addRow('Target', targets, `~${estimate(targets)}`, 'target-row');
     }
 
+    // Purdue's serving labels are free text: "1/2 Cup Serving", "Slice",
+    // "Each", "1 Each Serving", "1 Per Serving". Drop a trailing "Serving" and
+    // hide labels that only mean "one serving"; they add nothing next to the
+    // name or its "× 2" badge. Macros are per line, so the label is per serving.
+    function servingLabel(raw) {
+        const label = String(raw || '').trim().replace(/\s+/g, ' ').replace(/\s*serving$/i, '');
+        return /^(1 )?(each|per)?$/i.test(label) ? '' : label;
+    }
+
     function renderItems(plan) {
         els.items.textContent = '';
         plan.forEach((item) => {
@@ -434,9 +443,7 @@
             // The station says where in the dining court to find it, e.g. a
             // topping that lives at the "Salad Bar".
             const detail = document.createElement('p');
-            const size = item.serving_size
-                ? (servings > 1 ? `${item.serving_size} each` : item.serving_size)
-                : '';
+            const size = servingLabel(item.serving_size);
             detail.textContent = [item.station, size].filter(Boolean).join(' · ');
             info.append(name, detail);
 
