@@ -3,7 +3,6 @@ Unit tests for the Purdue Macro Finder
 Run with: python -m pytest test_file.py
 """
 
-import itertools
 import random
 import unittest
 from datetime import datetime, time, timedelta, timezone
@@ -772,12 +771,13 @@ class TestPlateRules(unittest.TestCase):
     def test_each_food_listed_once_with_a_serving_count(self):
         # Regression: the same food could appear twice as separate lines
         # ("Carved Ham, Carved Ham"). Extra servings are now one line.
+        from meal_finder_engine import _serving_caps
         for _ in range(10):
             plan = self._find()["plan"]
             names = [i["name"] for i in plan]
             self.assertEqual(len(names), len(set(names)))
             for item in plan:
-                self.assertIn(item["servings"], range(1, Config.MAX_SERVINGS + 1))
+                self.assertIn(item["servings"], range(1, _serving_caps([item], None)[0] + 1))
 
     def test_snapshot_items_are_not_mutated(self):
         self._find()
@@ -963,16 +963,26 @@ class TestOptimizer(unittest.TestCase):
 
     @staticmethod
     def _brute_force(pool, targets):
-        """Best score over every plate of MIN..MAX servings, <= MAX_SERVINGS per food."""
+        """Best score over every allowed plate: up to MAX_ITEMS different
+        foods, each within its serving cap, at least MIN_ITEMS servings."""
+        from meal_finder_engine import _serving_caps
         score = MealFinder._make_scorer(targets, Config.WEIGHTS, Config.PENALTIES)
+        caps = _serving_caps(pool, None)
         best = float("inf")
-        for k in range(Config.MIN_ITEMS, Config.MAX_ITEMS + 1):
-            for combo in itertools.combinations_with_replacement(range(len(pool)), k):
-                if max(combo.count(i) for i in set(combo)) > Config.MAX_SERVINGS:
-                    continue
-                best = min(best, score(sum(pool[i]["p"] for i in combo),
-                                       sum(pool[i]["c"] for i in combo),
-                                       sum(pool[i]["f"] for i in combo)))
+
+        def search(start, foods, servings, p, c, f):
+            nonlocal best
+            if servings >= Config.MIN_ITEMS:
+                best = min(best, score(p, c, f))
+            if foods == Config.MAX_ITEMS:
+                return
+            for i in range(start, len(pool)):
+                it = pool[i]
+                for k in range(1, caps[i] + 1):
+                    search(i + 1, foods + 1, servings + k,
+                           p + k * it["p"], c + k * it["c"], f + k * it["f"])
+
+        search(0, 0, 0, 0.0, 0.0, 0.0)
         return best
 
     def _solve(self, pool, targets, seed=0):
@@ -981,15 +991,15 @@ class TestOptimizer(unittest.TestCase):
         )
 
     def test_near_optimal_on_random_menus(self):
-        # The search is a heuristic. Measured on 120 random menus it found the
-        # exact optimum in 92% of them, and missed by at most ~5 score points
-        # (a few grams on one macro) otherwise. Hold it to that.
+        # The search is a heuristic. Measured on 60 random menus like these it
+        # found the exact optimum in 58, and missed by at most ~3.5 score
+        # points (a few grams on one macro) otherwise. Hold it to that.
         rng = random.Random(42)
         trials, exact = 8, 0
         for trial in range(trials):
             pool = [{"name": f"item{i}", "p": round(rng.uniform(0, 30), 1),
                      "c": round(rng.uniform(0, 50), 1), "f": round(rng.uniform(0, 20), 1)}
-                    for i in range(18)]
+                    for i in range(12)]
             targets = {"p": rng.choice([30, 40, 55]), "c": rng.choice([40, 60, 80]),
                        "f": rng.choice([15, 20, 30])}
             _, got, _ = self._solve(pool, targets, seed=trial)
@@ -1015,15 +1025,42 @@ class TestOptimizer(unittest.TestCase):
         self.assertAlmostEqual(score, 0.0, places=6)
         self.assertNotIn("Big Nuggets", [i["name"] for i in plan])
 
-    def test_plate_size_limits_count_servings(self):
+    def test_plate_limits(self):
+        # At most MAX_ITEMS different foods, each within its own serving cap,
+        # and at least MIN_ITEMS servings, even for absurd targets.
+        from meal_finder_engine import _serving_caps
         rng = random.Random(3)
         pool = [{"name": f"i{i}", "p": rng.uniform(0, 5), "c": rng.uniform(0, 5),
                  "f": rng.uniform(0, 5)} for i in range(30)]
-        servings = lambda plan: sum(i["servings"] for i in plan)
+        caps = dict(zip((i["name"] for i in pool), _serving_caps(pool, None)))
         plan, _, _ = self._solve(pool, {"p": 200, "c": 200, "f": 100})
-        self.assertLessEqual(servings(plan), Config.MAX_ITEMS)
+        self.assertLessEqual(len(plan), Config.MAX_ITEMS)
+        for item in plan:
+            self.assertLessEqual(item["servings"], caps[item["name"]])
         plan, _, _ = self._solve(pool, {"p": 0, "c": 0, "f": 0})
-        self.assertGreaterEqual(servings(plan), Config.MIN_ITEMS)
+        self.assertGreaterEqual(sum(i["servings"] for i in plan), Config.MIN_ITEMS)
+
+    def test_stacks_sliced_turkey_for_a_lean_protein_target(self):
+        # Regression: servings were capped at 2 per food, so a plate could
+        # hold 7 g of sliced turkey at most, and a 60 g protein / 0 g fat
+        # target got fried pork and chicken strips (54/15/10) instead.
+        pool = [
+            {"name": "Breaded Pork Tenderloin", "p": 22.7, "c": 11.3, "f": 4.4, "cal": 176},
+            {"name": "Garlic Herb Chicken Strip", "p": 12.0, "c": 1.5, "f": 2.6, "cal": 75,
+             "serving_size": "1/2 Cup"},
+            {"name": "Smoked Turkey Breast", "p": 3.7, "c": 0.3, "f": 0.3, "cal": 20,
+             "serving_size": "Slice"},
+            {"name": "Long Grain Rice", "p": 2.0, "c": 22.0, "f": 0.2, "cal": 100,
+             "serving_size": "1/2 Cup"},
+            {"name": "Steamed Broccoli", "p": 1.5, "c": 4.0, "f": 0.2, "cal": 25,
+             "serving_size": "1/2 Cup"},
+        ]
+        plan, score, totals = self._solve(pool, {"p": 60, "c": 10, "f": 0})
+        servings = {i["name"]: i["servings"] for i in plan}
+        self.assertGreaterEqual(servings.get("Smoked Turkey Breast", 0), 12)
+        self.assertNotIn("Breaded Pork Tenderloin", servings)
+        self.assertGreaterEqual(totals["p"], 55)
+        self.assertAlmostEqual(score, self._brute_force(pool, {"p": 60, "c": 10, "f": 0}), places=6)
 
     def test_high_protein_target_uses_a_second_serving(self):
         # A 70 g protein target is out of reach with one serving of each food
@@ -1044,6 +1081,44 @@ class TestOptimizer(unittest.TestCase):
         plan, score, totals = self._solve([{"name": "only", "p": 1, "c": 1, "f": 1}],
                                           {"p": 40, "c": 60, "f": 20})
         self.assertIsNone(plan)
+
+
+class TestPortions(unittest.TestCase):
+    """How many servings of one food a plate may hold: about a normal helping."""
+
+    def _cap(self, name, p, c, f, cal, label, station="Grill"):
+        from meal_finder_engine import _make_plate_check, _serving_caps
+        item = {"name": name, "p": p, "c": c, "f": f, "cal": cal, "serving_size": label,
+                "station": station}
+        special, _ = _make_plate_check([item, _item("Plain Food", station, 10, 10, 1)])
+        return _serving_caps([item], special and special[:1])[0]
+
+    def test_caps(self):
+        cases = [
+            # Protein-dense small units stack: 350 kcal of sliced turkey.
+            (("Smoked Turkey Breast", 3.7, 0.3, 0.3, 20, "Slice"), 17),
+            # Volume labels: at most 2 cups.
+            (("Garlic Herb Chicken Strip", 12, 1.5, 2.6, 75, "1/2 Cup"), 4),
+            (("Broccoli Florets", 1.5, 4, 0.2, 15, "1/2 Cup"), 4),
+            # Low-calorie produce counted in pieces: at most 6 servings.
+            (("Sliced Tomatoes", 0.5, 2.5, 0.1, 12, "2 Slices"), 6),
+            # Entree-sized servings: always allowed two.
+            (("Breaded Pork Tenderloin", 22.7, 11.3, 4.4, 176, "1 Each Serving"), 2),
+            (("Herb Crusted Pork Loin", 26, 0, 16, 250, "4 oz Serving"), 2),
+            # Add-ons: one serving.
+            (("Ranch Dressing", 0, 1, 7, 70, "Tablespoon"), 1),
+        ]
+        for args, cap in cases:
+            self.assertEqual(self._cap(*args), cap, args[0])
+
+    def test_label_amounts(self):
+        from meal_finder_engine import _label_amount, _CUPS, _OUNCES
+        self.assertEqual(_label_amount(_CUPS, "1/2 Cup Serving"), 0.5)
+        self.assertEqual(_label_amount(_CUPS, "Cup"), 1.0)
+        self.assertEqual(_label_amount(_OUNCES, "4 oz. Serving"), 4.0)
+        self.assertEqual(_label_amount(_OUNCES, ".66  oz. Slice"), 0.66)
+        self.assertIsNone(_label_amount(_CUPS, "Slice"))
+        self.assertIsNone(_label_amount(_OUNCES, "8x10 Cut Serving"))
 
 
 class TestMealNow(unittest.TestCase):

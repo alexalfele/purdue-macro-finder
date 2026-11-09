@@ -22,14 +22,31 @@ class Config:
     ITERATIONS = 1000
     FINAL_TEMP = 0.05
     RESTARTS = 4
+    # Annealed plates that get the (expensive) two-serving deep polish.
+    POLISH_TOP = 3
 
-    # Meal plan constraints. Item limits count servings, so "2 servings of
-    # chicken + rice" is 3 items. Two servings of one food is how high-protein
-    # targets (60 g+) become reachable in a single dining-court meal.
+    # Meal plan constraints. A plate holds at most MAX_ITEMS different foods
+    # and at least MIN_ITEMS servings in all.
     MIN_ITEMS = 2
     MAX_ITEMS = 5
     INITIAL_ITEMS = 4
+    # How much of one food: about a normal helping. Purdue's serving units
+    # range from a pork tenderloin to one slice of deli turkey (3.7 g
+    # protein), so a fixed count can't work; instead a food may repeat until
+    # it reaches MAX_PORTION_KCAL, or MAX_PORTION_CUPS / MAX_PORTION_OUNCES
+    # when its serving label states a size (350 kcal of broccoli is 17 cups).
+    # Any food may still be doubled (two chicken breasts, the way 60 g+
+    # protein targets become reachable). Protein-dense foods (at least half
+    # their calories from protein: sliced turkey, ham, chicken) repeat at most
+    # MAX_SERVINGS_PER_FOOD times; anything else at most MAX_SERVINGS_OTHER,
+    # so low-calorie produce can't become 32 tomato slices. Sauces, toppings
+    # and spreads: one serving.
     MAX_SERVINGS = 2
+    MAX_PORTION_KCAL = 350
+    MAX_PORTION_CUPS = 2
+    MAX_PORTION_OUNCES = 8
+    MAX_SERVINGS_PER_FOOD = 20
+    MAX_SERVINGS_OTHER = 6
     # Foods with less than this many grams of protein + carbs + fat (lettuce,
     # spices, peppers) can't meaningfully change a plate's macros; offering
     # them only fills plates with noise like "Arugula: 0 g / 1 g / 0 g".

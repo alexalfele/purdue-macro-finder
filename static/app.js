@@ -530,6 +530,39 @@
         return /^(1 )?(each|per)?$/i.test(label) ? '' : label;
     }
 
+    const FRACTIONS = { 0.25: '¼', 0.5: '½', 0.75: '¾' };
+
+    // 1.5 -> "1½", 0.75 -> "¾"; anything else to one decimal.
+    function formatAmount(x) {
+        const whole = Math.floor(x + 1e-9);
+        const part = Math.round((x - whole) * 100) / 100;
+        if (part === 0) return String(whole);
+        if (FRACTIONS[part]) return `${whole || ''}${FRACTIONS[part]}`;
+        return String(Math.round(x * 10) / 10);
+    }
+
+    // How much to take in total: "Slice" × 16 -> "16 slices",
+    // "1/2 Cup" × 4 -> "2 cups". Otherwise the per-serving label, since the
+    // "× n" badge already gives the count.
+    function amountLabel(raw, servings) {
+        const label = servingLabel(raw);
+        if (!label || servings < 2) return label;
+        const unit = label.match(/^(?:(\d+) )?(slice|tablespoon|teaspoon|ounce|piece|wedge|strip|stick|link|patty|patties|egg|cookie|bun)s?$/i);
+        if (unit) {
+            const word = unit[2].toLowerCase().replace(/^patties$/, 'patty');
+            return `${Number(unit[1] || 1) * servings} ${word === 'patty' ? 'patties' : `${word}s`}`;
+        }
+        const ounces = label.match(/^(\d*\.?\d+) ?(?:oz\.?|ounces?)$/i);
+        if (ounces) return `${formatAmount(Number(ounces[1]) * servings)} oz`;
+        const cups = label.match(/^(?:(\d+)\/(\d+)|(\d*\.?\d+))? ?cups?$/i);
+        if (cups) {
+            const each = cups[1] ? Number(cups[1]) / Number(cups[2]) : Number(cups[3] || 1);
+            const total = each * servings;
+            return `${formatAmount(total)} ${total > 1 ? 'cups' : 'cup'}`;
+        }
+        return label;
+    }
+
     function renderItems(plan) {
         els.items.textContent = '';
         plan.forEach((item) => {
@@ -555,7 +588,7 @@
             // they go with: "Tzatziki Sauce: Firewall · with Chicken Shawarma".
             if (item.goes_with) row.classList.add('item-addon');
             const detail = document.createElement('p');
-            const size = servingLabel(item.serving_size);
+            const size = amountLabel(item.serving_size, servings);
             const pairing = item.goes_with ? `with ${item.goes_with}` : '';
             detail.textContent = [item.station, size, pairing].filter(Boolean).join(' · ');
             info.append(name, detail);

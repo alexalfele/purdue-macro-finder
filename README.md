@@ -15,8 +15,10 @@ targets, from what is actually on the menu, and tells you where and when to get 
   the station they're served at.
 - **Where and when.** Each result names the court, the meal, and that meal's hours, and
   shows the best plate at every other dining court too, so you can pick the closest one.
-- **Realistic plates.** One meal period at one court per plate, up to five servings, at most
-  two of any one food (how 60 g+ protein targets become reachable).
+- **Realistic plates.** One meal period at one court per plate, up to five different foods,
+  each in about a normal helping: two pork tenderloins, or a 16-slice stack of deli turkey
+  (Purdue lists turkey one 3.7 g-protein slice at a time). Sauces, dressings, toppings and
+  spreads come with something from their station to go on, and buns with a filling.
 - **Diet and allergen filters.** Vegetarian and vegan, and avoid gluten/wheat, milk, eggs,
   soy, peanuts, tree nuts, fish, shellfish, sesame, or coconut, using Purdue's allergen
   tags. Each item lists what it contains. Plus a free-text list of foods to skip.
@@ -40,11 +42,14 @@ targets, from what is actually on the menu, and tells you where and when to get 
 - **Time.** "Today" and "right now" are computed in Purdue's time zone
   (America/Indiana/Indianapolis), not the server clock, which is UTC on Render.
 - **Optimizer** (`meal_finder_engine.py`). For each (dining court, meal period) it searches
-  plates of 2 to 5 servings: simulated annealing from several greedy seeds, then a local
-  search over every one- and two-serving change, scoring weighted, asymmetric misses
-  (under-protein, over-carb, and over-fat cost more). On random menus it finds the
-  brute-force optimum 92% of the time and otherwise lands within a few grams, at about
-  10 ms per court and meal. Tunables live in `config.py`.
+  plates of up to 5 different foods, each capped at about a normal helping (350 kcal, 2
+  cups or 8 oz; at least 2 servings, at most 20 for protein-dense foods and 6 otherwise).
+  Simulated annealing runs from one-serving-at-a-time and portion-at-a-time greedy seeds,
+  then a local search over one- and two-serving changes, paired amount changes, and
+  restacking, scoring weighted, asymmetric misses (under-protein, over-carb, and over-fat
+  cost more). Moves that would strand an add-on (a sauce with nothing to go on, a bun with
+  no filling) are skipped. On random entree-style menus it finds the brute-force optimum
+  58 times in 60, at about 10 ms per court and meal. Tunables live in `config.py`.
 
 ## Local development
 
